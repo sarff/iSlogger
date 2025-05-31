@@ -11,7 +11,7 @@ import (
 
 func main() {
 	// Advanced configuration with JSON format and custom time
-	config := islogger.DefaultConfig().
+	config := iSlogger.DefaultConfig().
 		WithAppName("advanced-app").
 		WithDebug(true).
 		WithLogDir("advanced-logs").
@@ -20,7 +20,7 @@ func main() {
 		WithTimeFormat("2006-01-02 15:04:05")
 
 	// Create multiple logger instances
-	logger1, err := islogger.New(config)
+	logger1, err := iSlogger.New(config)
 	if err != nil {
 		panic(err)
 	}
@@ -31,7 +31,7 @@ func main() {
 		WithAppName("service-2").
 		WithJSONFormat(false) // Text format
 
-	logger2, err := islogger.New(config2)
+	logger2, err := iSlogger.New(config2)
 	if err != nil {
 		panic(err)
 	}

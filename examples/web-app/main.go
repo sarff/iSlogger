@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+
+	"github.com/sarff/iSlogger"
 )
 
 type User struct {
@@ -18,25 +20,25 @@ type User struct {
 }
 
 type Server struct {
-	logger *islogger.Logger
+	logger *iSlogger.Logger
 }
 
 func main() {
 	// Initialize logger for web application
-	config := islogger.DefaultConfig().
+	config := iSlogger.DefaultConfig().
 		WithAppName("webapp").
 		WithDebug(false). // Production mode
 		WithLogDir("web-logs").
 		WithJSONFormat(true) // JSON format for log aggregation
 
-	if err := islogger.Init(config); err != nil {
+	if err := iSlogger.Init(config); err != nil {
 		panic(fmt.Sprintf("Failed to initialize logger: %v", err))
 	}
-	defer islogger.Close()
+	defer iSlogger.Close()
 
 	// Create server instance
 	server := &Server{
-		logger: islogger.GetGlobalLogger(),
+		logger: iSlogger.GetGlobalLogger(),
 	}
 
 	// Setup HTTP routes
@@ -57,14 +59,14 @@ func main() {
 
 	// Start server in goroutine
 	go func() {
-		islogger.Info("Starting web server",
+		iSlogger.Info("Starting web server",
 			"port", 8080,
 			"debug_mode", false,
 			"log_format", "json",
 		)
 
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			islogger.Error("Server failed to start", "error", err)
+			iSlogger.Error("Server failed to start", "error", err)
 			os.Exit(1)
 		}
 	}()
@@ -74,7 +76,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	islogger.Info("Server is shutting down...")
+	iSlogger.Info("Server is shutting down...")
 
 	// Create context with timeout for graceful shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -82,11 +84,11 @@ func main() {
 
 	// Shutdown server
 	if err := httpServer.Shutdown(ctx); err != nil {
-		islogger.Error("Server forced to shutdown", "error", err)
+		iSlogger.Error("Server forced to shutdown", "error", err)
 		os.Exit(1)
 	}
 
-	islogger.Info("Server stopped gracefully")
+	iSlogger.Info("Server stopped gracefully")
 }
 
 // loggingMiddleware logs HTTP requests
@@ -159,11 +161,11 @@ func (rw *responseWriter) WriteHeader(code int) {
 }
 
 // getLogger extracts logger from request context
-func getLogger(r *http.Request) *islogger.Logger {
-	if logger, ok := r.Context().Value("logger").(*islogger.Logger); ok {
+func getLogger(r *http.Request) *iSlogger.Logger {
+	if logger, ok := r.Context().Value("logger").(*iSlogger.Logger); ok {
 		return logger
 	}
-	return islogger.GetGlobalLogger()
+	return iSlogger.GetGlobalLogger()
 }
 
 // homeHandler handles the root endpoint

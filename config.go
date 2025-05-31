@@ -19,7 +19,7 @@ func DefaultConfig() Config {
 		Debug:         false,
 		RetentionDays: 7,
 		JSONFormat:    false,
-		AddSource:     true,
+		AddSource:     false,
 		TimeFormat:    time.RFC3339, // "2006-01-02T15:04:05Z07:00"
 	}
 }

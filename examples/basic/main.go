@@ -2,46 +2,48 @@ package main
 
 import (
 	"time"
+
+	"github.com/sarff/iSlogger"
 )
 
 func main() {
 	// Initialize global logger with default configuration
-	config := islogger.DefaultConfig().
+	config := iSlogger.DefaultConfig().
 		WithAppName("myapp").
 		WithDebug(true).
 		WithLogDir("logs")
 
-	if err := islogger.Init(config); err != nil {
+	if err := iSlogger.Init(config); err != nil {
 		panic(err)
 	}
-	defer islogger.Close()
+	defer iSlogger.Close()
 
 	// Use global convenience functions
-	islogger.Info("Application started", "version", "1.0.0")
-	islogger.Debug("Debug information", "user_id", 123)
-	islogger.Warn("This is a warning", "component", "database")
-	islogger.Error("Something went wrong", "error", "connection timeout")
+	iSlogger.Info("Application started", "version", "1.0.0")
+	iSlogger.Debug("Debug information", "user_id", 123)
+	iSlogger.Warn("This is a warning", "component", "database")
+	iSlogger.Error("Something went wrong", "error", "connection timeout")
 
 	// Create logger with context
-	userLogger := islogger.With("user_id", 456, "session", "abc123")
+	userLogger := iSlogger.With("user_id", 456, "session", "abc123")
 	userLogger.Info("User logged in", "username", "john_doe")
 	userLogger.Error("User action failed", "action", "purchase", "reason", "insufficient funds")
 
 	// Demonstrate debug mode switching
-	islogger.Info("Switching to production mode...")
-	islogger.SetDebug(false) // Only warnings and errors will be logged
+	iSlogger.Info("Switching to production mode...")
+	iSlogger.SetDebug(false) // Only warnings and errors will be logged
 
-	islogger.Debug("This won't appear") // Won't be logged
-	islogger.Info("This won't appear")  // Won't be logged
-	islogger.Warn("This will appear")   // Will be logged
-	islogger.Error("This will appear")  // Will be logged
+	iSlogger.Debug("This won't appear") // Won't be logged
+	iSlogger.Info("This won't appear")  // Won't be logged
+	iSlogger.Warn("This will appear")   // Will be logged
+	iSlogger.Error("This will appear")  // Will be logged
 
 	// Switch back to debug mode
-	islogger.SetDebug(true)
-	islogger.Debug("Debug mode is back!")
+	iSlogger.SetDebug(true)
+	iSlogger.Debug("Debug mode is back!")
 
 	// Structured logging example
-	islogger.Info("Request processed",
+	iSlogger.Info("Request processed",
 		"method", "POST",
 		"path", "/api/users",
 		"status", 201,
