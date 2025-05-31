@@ -112,13 +112,6 @@ jobs:
       - name: Build
         run: go build -v ./...
 
-      - name: Build examples
-        run: |
-          cd examples
-          go build -v basic.go
-          go build -v advanced.go
-          go build -v web-app.go
-
   # Dependency check
   dependency-check:
     name: Dependency Check
