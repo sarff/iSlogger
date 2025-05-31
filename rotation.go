@@ -15,6 +15,7 @@ func (l *Logger) startCleanupRoutine() {
 
 	l.performCleanup()
 
+	//lint:ignore S1000 more idiomatic for select with multiple cases
 	for {
 		select {
 		case <-ticker.C:
