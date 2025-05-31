@@ -59,3 +59,9 @@ func (c Config) WithTimeFormat(format string) Config {
 	c.TimeFormat = format
 	return c
 }
+
+// WithAddSource enables Source
+func (c Config) WithAddSource(source bool) Config {
+	c.AddSource = source
+	return c
+}
