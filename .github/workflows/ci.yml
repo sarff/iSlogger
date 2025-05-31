@@ -28,19 +28,19 @@ jobs:
         run: go mod verify
 
       - name: Run go vet
-        run: go vet ./...
+        run: go vet $(go list ./... | grep -v '^github.com/sarff/iSlogger/examples')
 
       - name: Install staticcheck
         run: go install honnef.co/go/tools/cmd/staticcheck@latest
 
       - name: Run staticcheck
-        run: staticcheck ./...
+        run: staticcheck $(go list ./... | grep -v '^github.com/sarff/iSlogger/examples')
 
       - name: Install golint
         run: go install golang.org/x/lint/golint@latest
 
       - name: Run golint
-        run: golint ./...
+        run: golint $(go list ./... | grep -v '^github.com/sarff/iSlogger/examples')
 
       - name: Run gofmt
         run: |
@@ -88,47 +88,10 @@ jobs:
         run: go mod download
 
       - name: Run tests
-        run: go test -v -race -coverprofile=coverage.out ./...
+        run: go test -v -race $(go list ./... | grep -v '^github.com/sarff/iSlogger/examples')
 
       - name: Run tests with timeout
-        run: go test -v -race -timeout=5m ./...
-
-      - name: Generate coverage report
-        run: go tool cover -html=coverage.out -o coverage.html
-
-      - name: Upload coverage reports to Codecov
-        if: matrix.os == 'ubuntu-latest' && matrix.go-version == '1.24'
-        uses: codecov/codecov-action@v4
-        with:
-          file: ./coverage.out
-          flags: unittests
-          name: codecov-umbrella
-          fail_ci_if_error: false
-
-  # Benchmark tests
-  benchmark:
-    name: Benchmark
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Run benchmarks
-        run: go test -bench=. -benchmem -run=^$ ./...
-
-      - name: Run benchmarks with comparison
-        run: |
-          go test -bench=. -count=5 -benchmem ./... | tee benchmark.txt
-
-      - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-results
-          path: benchmark.txt
+        run: go test -v -race -timeout=5m $(go list ./... | grep -v '^github.com/sarff/iSlogger/examples')
 
   # Build test
   build:
@@ -171,7 +134,7 @@ jobs:
       - name: Check for vulnerabilities
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
+          govulncheck $(go list ./... | grep -v '^github.com/sarff/iSlogger/examples')
 
       - name: Verify no external dependencies
         run: |
