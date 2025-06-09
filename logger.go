@@ -7,9 +7,31 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
+
+// levelFilterWriter filters logs by level
+type levelFilterWriter struct {
+	writer   io.Writer
+	maxLevel slog.Level // Maximum level to write (inclusive)
+}
+
+func (lfw *levelFilterWriter) Write(p []byte) (n int, err error) {
+	logStr := string(p)
+
+	if strings.Contains(logStr, "level=WARN") ||
+		strings.Contains(logStr, "level=ERROR") ||
+		strings.Contains(logStr, `"level":"WARN"`) ||
+		strings.Contains(logStr, `"level":"ERROR"`) {
+		// Don't write WARN/ERROR to info file
+		return len(p), nil
+	}
+
+	// Write DEBUG/INFO to info file
+	return lfw.writer.Write(p)
+}
 
 // Logger wraps slog.Logger with file rotation
 type Logger struct {
@@ -89,7 +111,12 @@ func (l *Logger) initLoggers() error {
 	}
 
 	// Create multi-writers for console + file output
-	infoWriter := io.MultiWriter(os.Stdout, l.infoFile)
+	infoFileWriter := &levelFilterWriter{
+		writer:   l.infoFile,
+		maxLevel: slog.LevelInfo, // Only DEBUG and INFO
+	}
+
+	infoWriter := io.MultiWriter(os.Stdout, infoFileWriter)
 	errorWriter := io.MultiWriter(os.Stderr, l.errorFile)
 
 	// slog options

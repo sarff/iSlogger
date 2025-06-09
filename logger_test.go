@@ -137,7 +137,8 @@ func TestConfigBuilder(t *testing.T) {
 		WithDebug(true).
 		WithRetentionDays(14).
 		WithJSONFormat(true).
-		WithTimeFormat("2006-01-02 15:04:05")
+		WithTimeFormat("2006-01-02 15:04:05").
+		WithAddSource(true)
 
 	if config.AppName != "builder-test" {
 		t.Errorf("Expected app name 'builder-test', got '%s'", config.AppName)
@@ -161,6 +162,10 @@ func TestConfigBuilder(t *testing.T) {
 
 	if config.TimeFormat != "2006-01-02 15:04:05" {
 		t.Errorf("Expected custom time format, got '%s'", config.TimeFormat)
+	}
+
+	if !config.AddSource {
+		t.Error("Expected add-source to be disabled")
 	}
 }
 
