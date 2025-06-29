@@ -447,5 +447,8 @@ iSlogger is fully thread-safe and supports concurrent logging from multiple goro
 5. Open a Pull Request
 
 ---
+## 🚀 Roadmap & Tasks
+
+See [TODO.md](TODO.md) for current tasks and progress tracking.
 
 Made with ❤️ in Ukraine 🇺🇦
