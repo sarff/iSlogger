@@ -141,7 +141,7 @@ func (l *Logger) initLoggers() error {
 		opts.Level = slog.LevelWarn
 	}
 
-	// Create handlers
+	// Create base handlers
 	var infoHandler, errorHandler slog.Handler
 	if l.config.JSONFormat {
 		infoHandler = slog.NewJSONHandler(infoWriter, opts)
@@ -151,8 +151,12 @@ func (l *Logger) initLoggers() error {
 		errorHandler = slog.NewTextHandler(errorWriter, opts)
 	}
 
-	l.infoLogger = slog.New(infoHandler)
-	l.errorLogger = slog.New(errorHandler)
+	// Wrap with filtered handlers
+	filteredInfoHandler := newFilteredHandler(infoHandler, l.config.Filters)
+	filteredErrorHandler := newFilteredHandler(errorHandler, l.config.Filters)
+
+	l.infoLogger = slog.New(filteredInfoHandler)
+	l.errorLogger = slog.New(filteredErrorHandler)
 
 	l.currentDate = today
 	return nil
