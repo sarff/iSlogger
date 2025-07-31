@@ -1,0 +1,2 @@
+time=2025-06-29T10:53:53+03:00 level=WARN msg="High memory usage" memory_percent=85 service=web-server
+time=2025-06-29T10:53:53+03:00 level=ERROR msg="Service unavailable" service=database error="connection timeout" password=***

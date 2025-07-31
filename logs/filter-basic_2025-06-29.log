@@ -1,0 +1,2 @@
+time=2025-06-29T10:53:53+03:00 level=INFO msg="User registration" username=john_doe password=*** api_key=***HIDDEN*** payment_info="Card: ****-****-****-****"
+time=2025-06-29T10:53:53+03:00 level=INFO msg="User logged in" user_id=12345 timestamp=2025-06-29T10:53:53.385+03:00

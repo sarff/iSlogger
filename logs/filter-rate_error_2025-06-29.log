@@ -1,0 +1,2 @@
+time=2025-06-29T10:53:53+03:00 level=WARN msg="This warning will always be logged"
+time=2025-06-29T10:53:53+03:00 level=ERROR msg="This error will always be logged"

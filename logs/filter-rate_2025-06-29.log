@@ -1,0 +1,5 @@
+time=2025-06-29T10:53:53+03:00 level=DEBUG msg="Debug message" count=0 timestamp=2025-06-29T10:53:53.386+03:00
+time=2025-06-29T10:53:53+03:00 level=DEBUG msg="Debug message" count=1 timestamp=2025-06-29T10:53:53.386+03:00
+time=2025-06-29T10:53:53+03:00 level=DEBUG msg="Debug message" count=2 timestamp=2025-06-29T10:53:53.386+03:00
+time=2025-06-29T10:53:53+03:00 level=DEBUG msg="Debug message" count=3 timestamp=2025-06-29T10:53:53.386+03:00
+time=2025-06-29T10:53:53+03:00 level=DEBUG msg="Debug message" count=4 timestamp=2025-06-29T10:53:53.386+03:00
