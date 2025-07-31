@@ -40,6 +40,8 @@ type Logger struct {
 	errorLogger *slog.Logger
 	infoFile    *os.File
 	errorFile   *os.File
+	infoBuffer  *bufferedWriter
+	errorBuffer *bufferedWriter
 	currentDate string
 	mu          sync.RWMutex
 }
@@ -61,7 +63,7 @@ func New(config Config) (*Logger, error) {
 	}
 
 	// Create log directory
-	if err := os.MkdirAll(config.LogDir, 0o755); err != nil {
+	if err := os.MkdirAll(config.LogDir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create log directory: %w", err)
 	}
 
@@ -85,7 +87,13 @@ func (l *Logger) initLoggers() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	// Close existing files if open
+	// Close existing buffers and files if open
+	if l.infoBuffer != nil {
+		l.infoBuffer.Close()
+	}
+	if l.errorBuffer != nil {
+		l.errorBuffer.Close()
+	}
 	if l.infoFile != nil {
 		l.infoFile.Close()
 	}
@@ -98,26 +106,44 @@ func (l *Logger) initLoggers() error {
 
 	// Open info log file
 	infoPath := filepath.Join(l.config.LogDir, fmt.Sprintf("%s_%s.log", l.config.AppName, today))
-	l.infoFile, err = os.OpenFile(infoPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+
+	// FIX: G304: Potential file inclusion via variable
+	cleanPath := filepath.Clean(infoPath)
+	if !strings.HasPrefix(cleanPath, l.config.LogDir) {
+		return fmt.Errorf("invalid log file path: %s", cleanPath)
+	}
+
+	l.infoFile, err = os.OpenFile(infoPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to open info log file: %w", err)
 	}
 
 	// Open error log file
 	errorPath := filepath.Join(l.config.LogDir, fmt.Sprintf("%s_error_%s.log", l.config.AppName, today))
-	l.errorFile, err = os.OpenFile(errorPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+
+	// FIX: G304: Potential file inclusion via variable
+	cleanErrorPath := filepath.Clean(errorPath)
+	if !strings.HasPrefix(cleanErrorPath, l.config.LogDir) {
+		return fmt.Errorf("invalid log file path: %s", cleanPath)
+	}
+
+	l.errorFile, err = os.OpenFile(errorPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to open error log file: %w", err)
 	}
 
-	// Create multi-writers for console + file output
+	// Create buffered writers for file output
+	l.infoBuffer = newBufferedWriter(l.infoFile, l.config.BufferSize, l.config.FlushInterval, l.config.FlushOnLevel)
+	l.errorBuffer = newBufferedWriter(l.errorFile, l.config.BufferSize, l.config.FlushInterval, l.config.FlushOnLevel)
+
+	// Create multi-writers for console + buffered file output
 	infoFileWriter := &levelFilterWriter{
-		writer:   l.infoFile,
+		writer:   l.infoBuffer,
 		maxLevel: slog.LevelInfo, // Only DEBUG and INFO
 	}
 
 	infoWriter := io.MultiWriter(os.Stdout, infoFileWriter)
-	errorWriter := io.MultiWriter(os.Stderr, l.errorFile)
+	errorWriter := io.MultiWriter(os.Stderr, l.errorBuffer)
 
 	// slog options
 	opts := &slog.HandlerOptions{
@@ -213,6 +239,8 @@ func (l *Logger) With(args ...any) *Logger {
 		config:      l.config,
 		infoFile:    l.infoFile,
 		errorFile:   l.errorFile,
+		infoBuffer:  l.infoBuffer,
+		errorBuffer: l.errorBuffer,
 		currentDate: l.currentDate,
 		infoLogger:  l.infoLogger.With(args...),
 		errorLogger: l.errorLogger.With(args...),
@@ -229,6 +257,8 @@ func (l *Logger) WithContext(ctx context.Context) *Logger {
 		config:      l.config,
 		infoFile:    l.infoFile,
 		errorFile:   l.errorFile,
+		infoBuffer:  l.infoBuffer,
+		errorBuffer: l.errorBuffer,
 		currentDate: l.currentDate,
 		infoLogger:  l.infoLogger.WithGroup("context"),
 		errorLogger: l.errorLogger.WithGroup("context"),
@@ -248,12 +278,49 @@ func (l *Logger) SetDebug(debug bool) error {
 	return l.initLoggers()
 }
 
+// Flush flushes all buffers to ensure data is written to disk
+func (l *Logger) Flush() error {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	var errs []error
+	if l.infoBuffer != nil {
+		if err := l.infoBuffer.Flush(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if l.errorBuffer != nil {
+		if err := l.errorBuffer.Flush(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("errors flushing buffers: %v", errs)
+	}
+	return nil
+}
+
 // Close closes the logger and its files
 func (l *Logger) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	var errs []error
+
+	// Flush and close buffers first
+	if l.infoBuffer != nil {
+		if err := l.infoBuffer.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if l.errorBuffer != nil {
+		if err := l.errorBuffer.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	// Then close files
 	if l.infoFile != nil {
 		if err := l.infoFile.Close(); err != nil {
 			errs = append(errs, err)
@@ -266,7 +333,7 @@ func (l *Logger) Close() error {
 	}
 
 	if len(errs) > 0 {
-		return fmt.Errorf("errors closing files: %v", errs)
+		return fmt.Errorf("errors closing logger: %v", errs)
 	}
 	return nil
 }

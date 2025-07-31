@@ -67,7 +67,7 @@ func main() {
 
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			iSlogger.Error("Server failed to start", "error", err)
-			os.Exit(1)
+			os.Exit(1) // just example, dont do this ^)
 		}
 	}()
 

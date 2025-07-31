@@ -7,7 +7,7 @@
 - [ ] Automatic log compression (gzip)
 
 ## ⚡️ Performance
-- [ ] Buffered writes (batching)
+- [X] Buffered writes (batching)
 - [ ] Async logging via channels
 - [ ] Buffer pool to reduce GC pressure
 

@@ -1,8 +1,10 @@
 package iSlogger
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -321,4 +323,170 @@ func BenchmarkLogging(b *testing.B) {
 			logger.Info("Benchmark message", "iteration", b.N, "timestamp", time.Now())
 		}
 	})
+}
+
+func TestLogger_BufferedWrites(t *testing.T) {
+	tempDir := filepath.Join(os.TempDir(), "islogger_buffer_test")
+	defer os.RemoveAll(tempDir)
+
+	config := DefaultConfig().
+		WithLogDir(tempDir).
+		WithAppName("buffer_test").
+		WithDebug(true). // Enable debug to see INFO messages
+		WithBufferSize(1024).
+		WithFlushInterval(100 * time.Millisecond).
+		WithFlushOnLevel(slog.LevelError)
+
+	l, err := New(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer l.Close()
+
+	// Write some logs
+	l.Info("This is an info message")
+	l.Debug("This is a debug message")
+	l.Warn("This is a warning message")
+
+	// Check that files exist but may not have content yet (buffered)
+	infoFile := filepath.Join(tempDir, "buffer_test_"+time.Now().Format("2006-01-02")+".log")
+	errorFile := filepath.Join(tempDir, "buffer_test_error_"+time.Now().Format("2006-01-02")+".log")
+
+	// Files should exist
+	if _, err := os.Stat(infoFile); os.IsNotExist(err) {
+		t.Fatal("Info log file should exist")
+	}
+	if _, err := os.Stat(errorFile); os.IsNotExist(err) {
+		t.Fatal("Error log file should exist")
+	}
+
+	// Manual flush
+	err = l.Flush()
+	if err != nil {
+		t.Fatalf("Failed to flush logger: %v", err)
+	}
+
+	// Now files should have content
+	infoContent, err := os.ReadFile(infoFile)
+	if err != nil {
+		t.Fatalf("Failed to read info file: %v", err)
+	}
+	if !strings.Contains(string(infoContent), "This is an info message") {
+		t.Fatal("Info file should contain info message")
+	}
+
+	errorContent, err := os.ReadFile(errorFile)
+	if err != nil {
+		t.Fatalf("Failed to read error file: %v", err)
+	}
+	if !strings.Contains(string(errorContent), "This is a warning message") {
+		t.Fatal("Error file should contain warning message")
+	}
+}
+
+func TestLogger_BufferedWritesWithoutBuffering(t *testing.T) {
+	tempDir := filepath.Join(os.TempDir(), "islogger_nobuffer_test")
+	defer os.RemoveAll(tempDir)
+
+	config := DefaultConfig().
+		WithLogDir(tempDir).
+		WithAppName("nobuffer_test").
+		WithDebug(true).   // Enable debug to see INFO messages
+		WithoutBuffering() // Disable buffering
+
+	l, err := New(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer l.Close()
+
+	// Write some logs
+	l.Info("This is an info message")
+	l.Warn("This is a warning message")
+
+	// Files should have content immediately (no buffering)
+	infoFile := filepath.Join(tempDir, "nobuffer_test_"+time.Now().Format("2006-01-02")+".log")
+	errorFile := filepath.Join(tempDir, "nobuffer_test_error_"+time.Now().Format("2006-01-02")+".log")
+
+	infoContent, err := os.ReadFile(infoFile)
+	if err != nil {
+		t.Fatalf("Failed to read info file: %v", err)
+	}
+	if !strings.Contains(string(infoContent), "This is an info message") {
+		t.Fatal("Info file should immediately contain info message")
+	}
+
+	errorContent, err := os.ReadFile(errorFile)
+	if err != nil {
+		t.Fatalf("Failed to read error file: %v", err)
+	}
+	if !strings.Contains(string(errorContent), "This is a warning message") {
+		t.Fatal("Error file should immediately contain warning message")
+	}
+}
+
+func TestLogger_BufferedWritesAutoFlush(t *testing.T) {
+	tempDir := filepath.Join(os.TempDir(), "islogger_autoflush_test")
+	defer os.RemoveAll(tempDir)
+
+	config := DefaultConfig().
+		WithLogDir(tempDir).
+		WithAppName("autoflush_test").
+		WithDebug(true). // Enable debug to see INFO messages
+		WithBufferSize(1024).
+		WithFlushInterval(50 * time.Millisecond) // Very short interval
+
+	l, err := New(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer l.Close()
+
+	// Write a log
+	l.Info("This is an auto-flush test message")
+
+	infoFile := filepath.Join(tempDir, "autoflush_test_"+time.Now().Format("2006-01-02")+".log")
+
+	// Wait for auto-flush
+	time.Sleep(100 * time.Millisecond)
+
+	// File should have content due to auto-flush
+	infoContent, err := os.ReadFile(infoFile)
+	if err != nil {
+		t.Fatalf("Failed to read info file: %v", err)
+	}
+	if !strings.Contains(string(infoContent), "This is an auto-flush test message") {
+		t.Fatal("Info file should contain auto-flushed message")
+	}
+}
+
+func TestLogger_BufferedWritesImmediateFlushOnError(t *testing.T) {
+	tempDir := filepath.Join(os.TempDir(), "islogger_errorflush_test")
+	defer os.RemoveAll(tempDir)
+
+	config := DefaultConfig().
+		WithLogDir(tempDir).
+		WithAppName("errorflush_test").
+		WithBufferSize(1024).
+		WithFlushOnLevel(slog.LevelError) // Flush immediately on errors
+
+	l, err := New(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer l.Close()
+
+	// Write an error log
+	l.Error("This is an error message")
+
+	errorFile := filepath.Join(tempDir, "errorflush_test_error_"+time.Now().Format("2006-01-02")+".log")
+
+	// File should have content immediately due to error level flush
+	errorContent, err := os.ReadFile(errorFile)
+	if err != nil {
+		t.Fatalf("Failed to read error file: %v", err)
+	}
+	if !strings.Contains(string(errorContent), "This is an error message") {
+		t.Fatal("Error file should immediately contain error message")
+	}
 }

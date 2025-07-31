@@ -16,6 +16,7 @@ Production-ready Go logging package built on top of `slog` with automatic file r
 - **🔒 Field Filtering**: Mask or redact sensitive data (passwords, tokens, etc.)
 - **🎯 Conditional Logging**: Log only when specific conditions are met
 - **⚡ Rate Limiting**: Prevent log flooding with per-level rate limits
+- **🚀 Buffered Writes**: High-performance buffered I/O with intelligent flushing
 - **🛡️ Security**: Built-in protection for sensitive information
 
 ## 📦 Installation
@@ -78,6 +79,9 @@ defer logger.Close()
 | `JSONFormat` | `false` | Use JSON format instead of text |
 | `AddSource` | `false` | Include source file and line info |
 | `TimeFormat` | `RFC3339` | Custom time format |
+| `BufferSize` | `8192` | Buffer size in bytes (0 = no buffering) |
+| `FlushInterval` | `5s` | Time interval for automatic buffer flushing |
+| `FlushOnLevel` | `ERROR` | Minimum level that triggers immediate flush |
 
 ### Filtering Configuration Methods
 | Method | Description |
@@ -278,6 +282,126 @@ for i := 0; i < 1000; i++ {
 }
 ```
 
+## 🚀 Buffered Writes & Performance
+
+Boost logging performance with intelligent buffering that reduces I/O operations while ensuring critical messages are never lost:
+
+### Basic Buffering Configuration
+
+```go
+// Enable buffering with default settings (8KB buffer, 5s flush, ERROR flush)
+config := islogger.DefaultConfig().WithBuffering()
+
+// Or customize buffering parameters
+config := islogger.DefaultConfig().
+    WithBufferSize(16384).                        // 16KB buffer
+    WithFlushInterval(10 * time.Second).          // Auto-flush every 10 seconds  
+    WithFlushOnLevel(slog.LevelWarn)              // Immediately flush WARN+ levels
+
+logger, _ := islogger.New(config)
+defer logger.Close() // Automatically flushes buffers
+```
+
+### Disable Buffering for Real-time Logging
+
+```go
+// For applications requiring immediate log writes
+config := islogger.DefaultConfig().WithoutBuffering()
+
+logger, _ := islogger.New(config)
+logger.Info("This writes immediately to disk") // No buffering
+```
+
+### Manual Buffer Control
+
+```go
+logger := islogger.New(islogger.DefaultConfig().WithBuffering())
+
+// Log messages (buffered)
+logger.Info("Processing request", "id", 1)
+logger.Info("Processing request", "id", 2)
+logger.Info("Processing request", "id", 3)
+
+// Force flush at critical points
+if err := logger.Flush(); err != nil {
+    log.Printf("Failed to flush logs: %v", err)
+}
+
+// Critical messages flush immediately (based on FlushOnLevel)
+logger.Error("Critical error occurred") // Flushes immediately
+```
+
+### High-Performance Web Server Example
+
+```go
+// Optimized for high-throughput applications
+config := islogger.DefaultConfig().
+    WithAppName("webserver").
+    WithBufferSize(32768).                     // 32KB buffer for high volume
+    WithFlushInterval(2 * time.Second).        // Frequent auto-flush
+    WithFlushOnLevel(slog.LevelWarn).          // Immediate flush for warnings+
+    WithRateLimit(slog.LevelDebug, 1000, time.Minute) // Prevent debug spam
+
+logger, _ := islogger.New(config)
+defer logger.Close()
+
+// Handle thousands of requests with minimal I/O
+http.HandleFunc("/api", func(w http.ResponseWriter, r *http.Request) {
+    start := time.Now()
+    
+    // These are buffered for performance
+    logger.Info("Request started", "path", r.URL.Path, "method", r.Method)
+    
+    // ... process request ...
+    
+    if err != nil {
+        // This flushes immediately due to FlushOnLevel=WARN
+        logger.Error("Request failed", "error", err, "duration", time.Since(start))
+        http.Error(w, "Internal Server Error", 500)
+        return
+    }
+    
+    // This is buffered
+    logger.Info("Request completed", "duration", time.Since(start))
+})
+
+// Periodic flush for long-running operations  
+go func() {
+    ticker := time.NewTicker(30 * time.Second)
+    defer ticker.Stop()
+    
+    for range ticker.C {
+        logger.Flush() // Ensure logs are written regularly
+    }
+}()
+```
+
+### Buffering Configuration Methods
+
+| Method | Description |
+|--------|-------------|
+| `WithBuffering()` | Enable buffering with defaults (8KB, 5s, ERROR flush) |
+| `WithoutBuffering()` | Disable buffering for real-time logging |
+| `WithBufferSize(bytes)` | Set custom buffer size (0 = no buffering) |
+| `WithFlushInterval(duration)` | Set automatic flush interval |
+| `WithFlushOnLevel(level)` | Set minimum level for immediate flush |
+
+### Buffer Flushing Strategies
+
+1. **Size-based**: Buffer flushes when full (prevents memory overflow)
+2. **Time-based**: Automatic flush at configured intervals (prevents stale logs)  
+3. **Level-based**: Immediate flush for high-priority messages (ensures critical logs)
+4. **Manual**: Explicit control with `Flush()` method (for critical sections)
+5. **Shutdown**: Automatic flush on `Close()` (prevents data loss)
+
+### Performance Benefits
+
+- **Reduced I/O**: Batch multiple log entries into single disk writes
+- **Lower Latency**: Non-blocking writes for most log levels  
+- **Higher Throughput**: Handle thousands of logs per second efficiently
+- **Intelligent Flushing**: Critical messages bypass buffering for reliability
+- **Memory Efficient**: Fixed-size buffers prevent memory growth
+
 ## 🏭 Production Configuration
 
 Complete example for production environments:
@@ -306,7 +430,11 @@ config := islogger.DefaultConfig().
     )).
     // Rate limiting
     WithRateLimit(slog.LevelInfo, 1000, time.Minute).
-    WithRateLimit(slog.LevelDebug, 100, time.Minute)
+    WithRateLimit(slog.LevelDebug, 100, time.Minute).
+    // High-performance buffering
+    WithBufferSize(16384).                     // 16KB buffer for production
+    WithFlushInterval(3 * time.Second).        // Quick flush for responsiveness
+    WithFlushOnLevel(slog.LevelWarn)           // Immediate flush for warnings+
 
 logger, err := islogger.New(config)
 if err != nil {
@@ -351,6 +479,7 @@ WithContext(ctx context.Context) *Logger
 // Control functions
 SetDebug(debug bool) error
 SetLevel(level slog.Level) error
+Flush() error
 Close() error
 ```
 
@@ -373,6 +502,7 @@ WithContext(ctx context.Context) *Logger
 // Management methods
 SetDebug(debug bool) error
 SetLevel(level slog.Level) error
+Flush() error
 RotateNow() error
 CleanupNow()
 GetLogFiles() ([]string, error)
@@ -395,7 +525,11 @@ config := DefaultConfig().
     WithFieldMask("password", "***").
     WithRegexFilter(`\d{4}-\d{4}-\d{4}-\d{4}`, "****-****-****-****").
     WithLevelCondition(slog.LevelInfo).
-    WithRateLimit(slog.LevelDebug, 100, time.Minute)
+    WithRateLimit(slog.LevelDebug, 100, time.Minute).
+    // Add buffering
+    WithBufferSize(16384).
+    WithFlushInterval(5 * time.Second).
+    WithFlushOnLevel(slog.LevelWarn)
 ```
 
 ### Filtering Helper Functions

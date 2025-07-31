@@ -15,6 +15,11 @@ type Config struct {
 	AddSource     bool   // Add source file and line info
 	TimeFormat    string // Custom time format
 
+	// Buffering configuration
+	BufferSize    int           // Buffer size in bytes (0 = no buffering)
+	FlushInterval time.Duration // Time interval for automatic buffer flushing
+	FlushOnLevel  slog.Level    // Flush buffer immediately for logs at or above this level
+
 	// Filtering configuration
 	Filters FilterConfig // Filtering and conditional logging configuration
 }
@@ -27,7 +32,10 @@ func DefaultConfig() Config {
 		RetentionDays: 7,
 		JSONFormat:    false,
 		AddSource:     false,
-		TimeFormat:    time.RFC3339, // "2006-01-02T15:04:05Z07:00"
+		TimeFormat:    time.RFC3339,    // "2006-01-02T15:04:05Z07:00"
+		BufferSize:    8192,            // 8KB buffer by default
+		FlushInterval: 5 * time.Second, // Flush every 5 seconds
+		FlushOnLevel:  slog.LevelError, // Immediately flush errors
 		Filters:       DefaultFilterConfig(),
 	}
 }
@@ -145,4 +153,38 @@ func (c Config) WithAttributeCondition(key, value string) Config {
 // WithTimeBasedCondition adds a time-based condition
 func (c Config) WithTimeBasedCondition(startHour, endHour int) Config {
 	return c.WithCondition(TimeBasedCondition(startHour, endHour))
+}
+
+// Buffering configuration methods
+
+// WithBufferSize sets the buffer size in bytes (0 disables buffering)
+func (c Config) WithBufferSize(size int) Config {
+	c.BufferSize = size
+	return c
+}
+
+// WithFlushInterval sets the automatic flush interval
+func (c Config) WithFlushInterval(interval time.Duration) Config {
+	c.FlushInterval = interval
+	return c
+}
+
+// WithFlushOnLevel sets the minimum level that triggers immediate flush
+func (c Config) WithFlushOnLevel(level slog.Level) Config {
+	c.FlushOnLevel = level
+	return c
+}
+
+// WithBuffering enables buffering with default settings
+func (c Config) WithBuffering() Config {
+	c.BufferSize = 8192
+	c.FlushInterval = 5 * time.Second
+	c.FlushOnLevel = slog.LevelError
+	return c
+}
+
+// WithoutBuffering disables buffering
+func (c Config) WithoutBuffering() Config {
+	c.BufferSize = 0
+	return c
 }

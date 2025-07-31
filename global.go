@@ -140,6 +140,18 @@ func SetDebug(debug bool) error {
 	return nil
 }
 
+// Flush flushes all buffers of the global logger
+func Flush() error {
+	globalMu.RLock()
+	logger := defaultLogger
+	globalMu.RUnlock()
+
+	if logger != nil {
+		return logger.Flush()
+	}
+	return nil
+}
+
 // Close closes the global logger
 func Close() error {
 	globalMu.Lock()
