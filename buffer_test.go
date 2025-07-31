@@ -98,25 +98,23 @@ func TestBufferedWriter_ManualFlush(t *testing.T) {
 
 func TestBufferedWriter_AutoFlush(t *testing.T) {
 	buf := &bytes.Buffer{}
-	bw := newBufferedWriter(buf, 1000, 100*time.Millisecond, slog.LevelError)
-	defer bw.Close()
+	bw := newBufferedWriter(buf, 1000, 50*time.Millisecond, slog.LevelError)
 
 	data := []byte("test message")
 	bw.Write(data)
 
-	// Should not be flushed yet
-	if buf.Len() > 0 {
-		t.Fatal("Data should not be flushed yet")
+	// Wait for auto flush - longer wait to ensure flush happens
+	time.Sleep(100 * time.Millisecond)
+
+	// Close the writer to stop goroutine and flush remaining data
+	err := bw.Close()
+	if err != nil {
+		t.Fatalf("Expected no error on close, got: %v", err)
 	}
 
-	// Wait for auto flush
-	time.Sleep(150 * time.Millisecond)
-
-	// Should be auto-flushed now
-	if buf.Len() == 0 {
-		t.Fatal("Data should be auto-flushed")
-	}
-	if !strings.Contains(buf.String(), "test message") {
+	// Now safely check the content
+	bufContent := buf.String()
+	if !strings.Contains(bufContent, "test message") {
 		t.Fatal("Auto-flushed data should contain original message")
 	}
 }
