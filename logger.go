@@ -63,7 +63,7 @@ func New(config Config) (*Logger, error) {
 	}
 
 	// Create log directory
-	if err := os.MkdirAll(config.LogDir, 0o700); err != nil {
+	if err := os.MkdirAll(config.LogDir, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create log directory: %w", err)
 	}
 
@@ -113,7 +113,7 @@ func (l *Logger) initLoggers() error {
 		return fmt.Errorf("invalid log file path: %s", cleanPath)
 	}
 
-	l.infoFile, err = os.OpenFile(infoPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	l.infoFile, err = os.OpenFile(infoPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return fmt.Errorf("failed to open info log file: %w", err)
 	}
@@ -127,7 +127,7 @@ func (l *Logger) initLoggers() error {
 		return fmt.Errorf("invalid log file path: %s", cleanPath)
 	}
 
-	l.errorFile, err = os.OpenFile(errorPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	l.errorFile, err = os.OpenFile(errorPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return fmt.Errorf("failed to open error log file: %w", err)
 	}
