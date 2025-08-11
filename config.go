@@ -14,6 +14,7 @@ type Config struct {
 	JSONFormat    bool   // Use JSON format instead of text
 	AddSource     bool   // Add source file and line info
 	TimeFormat    string // Custom time format
+	ConsoleOutput bool   // Enable output to console (stdout/stderr)
 
 	// Buffering configuration
 	BufferSize    int           // Buffer size in bytes (0 = no buffering)
@@ -33,6 +34,7 @@ func DefaultConfig() Config {
 		JSONFormat:    false,
 		AddSource:     false,
 		TimeFormat:    time.RFC3339,    // "2006-01-02T15:04:05Z07:00"
+		ConsoleOutput: true,            // Enable console output by default
 		BufferSize:    8192,            // 8KB buffer by default
 		FlushInterval: 5 * time.Second, // Flush every 5 seconds
 		FlushOnLevel:  slog.LevelError, // Immediately flush errors
@@ -79,6 +81,12 @@ func (c Config) WithTimeFormat(format string) Config {
 // WithAddSource enables Source
 func (c Config) WithAddSource(source bool) Config {
 	c.AddSource = source
+	return c
+}
+
+// WithConsoleOutput enables or disables console output
+func (c Config) WithConsoleOutput(console bool) Config {
+	c.ConsoleOutput = console
 	return c
 }
 
