@@ -136,14 +136,22 @@ func (l *Logger) initLoggers() error {
 	l.infoBuffer = newBufferedWriter(l.infoFile, l.config.BufferSize, l.config.FlushInterval, l.config.FlushOnLevel)
 	l.errorBuffer = newBufferedWriter(l.errorFile, l.config.BufferSize, l.config.FlushInterval, l.config.FlushOnLevel)
 
-	// Create multi-writers for console + buffered file output
+	// Create writers based on console output configuration
 	infoFileWriter := &levelFilterWriter{
 		writer:   l.infoBuffer,
 		maxLevel: slog.LevelInfo, // Only DEBUG and INFO
 	}
 
-	infoWriter := io.MultiWriter(os.Stdout, infoFileWriter)
-	errorWriter := io.MultiWriter(os.Stderr, l.errorBuffer)
+	var infoWriter, errorWriter io.Writer
+	if l.config.ConsoleOutput {
+		// Enable console output
+		infoWriter = io.MultiWriter(os.Stdout, infoFileWriter)
+		errorWriter = io.MultiWriter(os.Stderr, l.errorBuffer)
+	} else {
+		// File output only
+		infoWriter = infoFileWriter
+		errorWriter = l.errorBuffer
+	}
 
 	// slog options
 	opts := &slog.HandlerOptions{
