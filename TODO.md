@@ -5,6 +5,7 @@
 - [ ] Support YAML, TOML formats
 - [ ] Size-based log rotation
 - [ ] Automatic log compression (gzip)
+- [X] Output console option
 
 ## ⚡️ Performance
 - [X] Buffered writes (batching)
