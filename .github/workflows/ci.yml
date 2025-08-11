@@ -138,10 +138,28 @@ jobs:
 
       - name: Verify no external dependencies
         run: |
-          DEPS=$(go list -m all | grep -v "github.com/sarff/iSlogger" | grep -v "^golang.org/toolchain" | wc -l | tr -d ' ')
-          if [ "$DEPS" -gt 1 ]; then
-            echo "❌ Found external dependencies:"
-            go list -m all
+          set -euo pipefail
+          echo "PWD: $(pwd)"
+          echo "GOMOD: $(go env GOMOD)"
+
+          # Поточний модуль (без хардкоду)
+          MOD=$(go list -m -f '{{.Path}}')
+          echo "Module: ${MOD}"
+
+          echo "All modules (for debug):"
+          go list -m -f '{{.Path}} {{.Version}}' all
+
+          # Рахуємо ЗОВНІШНІ модулі: відкидаємо свій і toolchain
+          DEPS=$(go list -m -f '{{.Path}}' all \
+            | awk -v mod="$MOD" '$1!=mod && $1!="golang.org/toolchain"' \
+            | wc -l | tr -d ' ')
+
+          echo "External module count: ${DEPS}"
+          if [ "$DEPS" -gt 0 ]; then
+            echo "❌ Found external dependencies (excluding your module and toolchain):"
+            go list -m -f '{{.Path}} {{.Version}}' all \
+              | awk -v mod="$MOD" '$1!=mod && $1!="golang.org/toolchain"'
             exit 1
           fi
+
           echo "✅ No external dependencies found"
