@@ -27,7 +27,7 @@ func basicFilteringExample() {
 	config := iSlogger.DefaultConfig().
 		WithAppName("filter-basic").
 		WithLogDir("logs").
-		WithDebug(true).
+		WithLogLevel(slog.LevelDebug).
 		// Mask sensitive fields
 		WithFieldMask("password", "***").
 		WithFieldMask("api_key", "***HIDDEN***").
@@ -60,7 +60,7 @@ func conditionalLoggingExample() {
 	config := iSlogger.DefaultConfig().
 		WithAppName("filter-condition").
 		WithLogDir("logs").
-		WithDebug(true).
+		WithLogLevel(slog.LevelDebug).
 		// Only log warnings/errors OR messages containing "important"
 		WithCondition(iSlogger.AnyCondition(
 			iSlogger.LevelCondition(slog.LevelWarn),
@@ -97,7 +97,7 @@ func rateLimitingExample() {
 	config := iSlogger.DefaultConfig().
 		WithAppName("filter-rate").
 		WithLogDir("logs").
-		WithDebug(true).
+		WithLogLevel(slog.LevelDebug).
 		// Limit DEBUG messages to 5 per minute
 		WithRateLimit(slog.LevelDebug, 5, time.Minute).
 		// Limit INFO messages to 20 per minute
@@ -126,7 +126,7 @@ func productionFilteringExample() {
 	config := iSlogger.DefaultConfig().
 		WithAppName("filter-production").
 		WithLogDir("logs").
-		WithDebug(false). // Production mode
+		WithLogLevel(slog.LevelWarn). // Production mode (WARN+)
 		// Security: mask all sensitive fields
 		WithFieldMask("password", "***").
 		WithFieldMask("api_key", "***").

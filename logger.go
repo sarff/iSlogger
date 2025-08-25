@@ -168,12 +168,8 @@ func (l *Logger) initLoggers() error {
 		},
 	}
 
-	// Set log level based on debug mode
-	if l.config.Debug {
-		opts.Level = slog.LevelDebug
-	} else {
-		opts.Level = slog.LevelWarn
-	}
+	// Set log level from config
+	opts.Level = l.config.LogLevel
 
 	// Create base handlers
 	var infoHandler, errorHandler slog.Handler
@@ -276,13 +272,7 @@ func (l *Logger) WithContext(ctx context.Context) *Logger {
 
 // SetLevel changes the log level dynamically
 func (l *Logger) SetLevel(level slog.Level) error {
-	l.config.Debug = level == slog.LevelDebug
-	return l.initLoggers()
-}
-
-// SetDebug enables or disables debug mode
-func (l *Logger) SetDebug(debug bool) error {
-	l.config.Debug = debug
+	l.config.LogLevel = level
 	return l.initLoggers()
 }
 

@@ -11,7 +11,7 @@ func TestFieldMasking(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("test-mask").
 		WithLogDir("test-logs-mask").
-		WithDebug(true).
+		WithLogLevel(slog.LevelDebug).
 		WithFieldMask("password", "***").
 		WithFieldMask("credit_card", "****-****-****-****")
 
@@ -32,7 +32,7 @@ func TestFieldRedaction(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("test-redact").
 		WithLogDir("test-logs-redact").
-		WithDebug(true).
+		WithLogLevel(slog.LevelDebug).
 		WithFieldRedaction("sensitive_data")
 
 	logger, err := New(config)
@@ -51,7 +51,7 @@ func TestRegexFilter(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("test-regex").
 		WithLogDir("test-logs-regex").
-		WithDebug(true).
+		WithLogLevel(slog.LevelDebug).
 		WithRegexFilter(`\d{4}-\d{4}-\d{4}-\d{4}`, "****-****-****-****").                    // Credit card pattern
 		WithRegexFilter(`\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b`, "***@***.***") // Email pattern
 
@@ -71,7 +71,7 @@ func TestConditionalLogging(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("test-condition").
 		WithLogDir("test-logs-condition").
-		WithDebug(true).
+		WithLogLevel(slog.LevelDebug).
 		WithLevelCondition(slog.LevelWarn).       // Only WARN and above
 		WithMessageContainsCondition("important") // OR contains "important"
 
@@ -95,7 +95,7 @@ func TestAttributeCondition(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("test-attr").
 		WithLogDir("test-logs-attr").
-		WithDebug(true).
+		WithLogLevel(slog.LevelDebug).
 		WithAttributeCondition("user_type", "admin") // Only admin users
 
 	logger, err := New(config)
@@ -115,7 +115,7 @@ func TestTimeBasedCondition(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("test-time").
 		WithLogDir("test-logs-time").
-		WithDebug(true).
+		WithLogLevel(slog.LevelDebug).
 		WithTimeBasedCondition(9, 17) // Only during work hours (9-17)
 
 	logger, err := New(config)
@@ -136,7 +136,7 @@ func TestRateLimit(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("test-rate").
 		WithLogDir("test-logs-rate").
-		WithDebug(true).
+		WithLogLevel(slog.LevelDebug).
 		WithRateLimit(slog.LevelDebug, 3, time.Minute) // Max 3 DEBUG per minute
 
 	logger, err := New(config)
@@ -159,7 +159,7 @@ func TestCombinedFilters(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("test-combined").
 		WithLogDir("test-logs-combined").
-		WithDebug(true).
+		WithLogLevel(slog.LevelDebug).
 		WithFieldMask("password", "***").
 		WithRegexFilter(`\d{4}-\d{4}-\d{4}-\d{4}`, "****-****-****-****").
 		WithLevelCondition(slog.LevelInfo). // Only INFO and above

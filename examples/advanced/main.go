@@ -13,7 +13,7 @@ func main() {
 	// Advanced configuration with JSON format and custom time
 	config := iSlogger.DefaultConfig().
 		WithAppName("advanced-app").
-		WithDebug(true).
+		WithLogLevel(slog.LevelDebug).
 		WithLogDir("advanced-logs").
 		WithRetentionDays(14).
 		WithJSONFormat(true).

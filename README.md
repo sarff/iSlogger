@@ -6,7 +6,7 @@ Production-ready Go logging package built on top of `slog` with automatic file r
 
 - **Dual Output Streams**: Separate files for general logs and errors
 - **Automatic File Rotation**: Daily rotation with configurable retention
-- **Debug/Production Modes**: Easy switching between detailed and minimal logging
+- **Flexible Log Levels**: Support for all slog levels (DEBUG, INFO, WARN, ERROR)
 - **Structured Logging**: Built on Go's standard `slog` package
 - **Thread-Safe**: Concurrent logging support with mutex protection
 - **Zero Dependencies**: Uses only Go standard library
@@ -55,7 +55,7 @@ func main() {
 config := islogger.DefaultConfig().
     WithAppName("myapp").
     WithLogDir("logs").
-    WithDebug(true).
+    WithLogLevel(slog.LevelDebug).
     WithRetentionDays(14).
     WithJSONFormat(true).
     WithTimeFormat("2006-01-02 15:04:05")
@@ -74,7 +74,7 @@ defer logger.Close()
 |--------|---------|-------------|
 | `LogDir` | `"logs"` | Directory for log files |
 | `AppName` | `"app"` | Application name (used in filenames) |
-| `Debug` | `false` | Enable debug level logging |
+| `LogLevel` | `INFO` | Minimum log level (DEBUG, INFO, WARN, ERROR) |
 | `RetentionDays` | `7` | Days to keep old log files |
 | `JSONFormat` | `false` | Use JSON format instead of text |
 | `AddSource` | `false` | Include source file and line info |
@@ -114,16 +114,18 @@ logs/
 
 ## 🎯 Usage Examples
 
-### Debug Mode Switching
+### Log Level Management
 
 ```go
-// Start in production mode (only warnings and errors)
-logger.SetDebug(false)
+// Start with WARN level (only warnings and errors)
+logger.SetLevel(slog.LevelWarn)
 logger.Debug("Won't be logged")
+logger.Info("Won't be logged") 
+logger.Warn("Will be logged")
 logger.Error("Will be logged")
 
-// Switch to debug mode
-logger.SetDebug(true)
+// Switch to DEBUG level (all messages)
+logger.SetLevel(slog.LevelDebug)
 logger.Debug("Now this will be logged")
 ```
 
@@ -410,7 +412,7 @@ Complete example for production environments:
 config := islogger.DefaultConfig().
     WithAppName("myapp").
     WithLogDir("/var/log/myapp").
-    WithDebug(false).
+    WithLogLevel(slog.LevelWarn).
     WithRetentionDays(30).
     WithJSONFormat(true).
     // Security: mask sensitive fields
@@ -477,7 +479,6 @@ With(args ...any) *Logger
 WithContext(ctx context.Context) *Logger
 
 // Control functions
-SetDebug(debug bool) error
 SetLevel(level slog.Level) error
 Flush() error
 Close() error
@@ -500,7 +501,6 @@ With(args ...any) *Logger
 WithContext(ctx context.Context) *Logger
 
 // Management methods
-SetDebug(debug bool) error
 SetLevel(level slog.Level) error
 Flush() error
 RotateNow() error
@@ -516,7 +516,7 @@ Close() error
 config := DefaultConfig().
     WithAppName("myapp").
     WithLogDir("custom-logs").
-    WithDebug(true).
+    WithLogLevel(slog.LevelDebug).
     WithRetentionDays(30).
     WithJSONFormat(true).
     WithTimeFormat("2006-01-02 15:04:05").
@@ -551,7 +551,7 @@ RegexMaskFilter(pattern, mask string) RegexFilter
 
 ## 🎨 Log Levels
 
-- **Debug**: Detailed information for debugging (only in debug mode)
+- **Debug**: Detailed information for debugging (when LogLevel is DEBUG)
 - **Info**: General information about application flow
 - **Warn**: Warning messages (logged to both files)
 - **Error**: Error messages (logged to both files)

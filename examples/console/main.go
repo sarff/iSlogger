@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log/slog"
 	"time"
 
 	"github.com/sarff/iSlogger"
@@ -10,7 +11,7 @@ func main() {
 	// Example 1: Default behavior (console output enabled)
 	config1 := iSlogger.DefaultConfig().
 		WithAppName("console-app").
-		WithDebug(true).
+		WithLogLevel(slog.LevelDebug).
 		WithLogDir("logs")
 
 	logger1, err := iSlogger.New(config1)
@@ -26,7 +27,7 @@ func main() {
 	// Example 2: Disable console output (file only)
 	config2 := iSlogger.DefaultConfig().
 		WithAppName("file-only-app").
-		WithDebug(true).
+		WithLogLevel(slog.LevelDebug).
 		WithLogDir("logs").
 		WithConsoleOutput(false)
 
@@ -43,7 +44,7 @@ func main() {
 	// Example 3: Explicitly enable console output
 	config3 := iSlogger.DefaultConfig().
 		WithAppName("explicit-console").
-		WithDebug(true).
+		WithLogLevel(slog.LevelDebug).
 		WithLogDir("logs").
 		WithConsoleOutput(true)
 
@@ -59,7 +60,7 @@ func main() {
 	// Example 4: JSON format with console output
 	config4 := iSlogger.DefaultConfig().
 		WithAppName("json-console").
-		WithDebug(true).
+		WithLogLevel(slog.LevelDebug).
 		WithLogDir("logs").
 		WithJSONFormat(true).
 		WithConsoleOutput(true)
