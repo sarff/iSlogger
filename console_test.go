@@ -2,6 +2,7 @@ package iSlogger
 
 import (
 	"bytes"
+	"log/slog"
 	"os"
 	"strings"
 	"testing"
@@ -20,7 +21,7 @@ func TestConsoleOutput_Enabled(t *testing.T) {
 		WithAppName("console-test").
 		WithLogDir("test-logs").
 		WithConsoleOutput(true).
-		WithDebug(true)
+		WithLogLevel(slog.LevelDebug)
 
 	logger, err := New(config)
 	if err != nil {
@@ -57,7 +58,7 @@ func TestConsoleOutput_Disabled(t *testing.T) {
 		WithAppName("console-test-disabled").
 		WithLogDir("test-logs").
 		WithConsoleOutput(false).
-		WithDebug(true)
+		WithLogLevel(slog.LevelDebug)
 
 	logger, err := New(config)
 	if err != nil {

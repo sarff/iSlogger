@@ -13,7 +13,7 @@ func TestNew(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("test").
 		WithLogDir("test-logs").
-		WithDebug(true)
+		WithLogLevel(slog.LevelDebug)
 
 	logger, err := New(config)
 	if err != nil {
@@ -26,8 +26,8 @@ func TestNew(t *testing.T) {
 		t.Errorf("Expected app name 'test', got '%s'", logger.config.AppName)
 	}
 
-	if !logger.config.Debug {
-		t.Error("Expected debug mode to be enabled")
+	if logger.config.LogLevel != slog.LevelDebug {
+		t.Error("Expected log level to be DEBUG")
 	}
 }
 
@@ -35,7 +35,7 @@ func TestLogLevels(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("test-levels").
 		WithLogDir("test-logs-levels").
-		WithDebug(true)
+		WithLogLevel(slog.LevelDebug)
 
 	logger, err := New(config)
 	if err != nil {
@@ -62,30 +62,30 @@ func TestLogLevels(t *testing.T) {
 	}
 }
 
-func TestDebugMode(t *testing.T) {
+func TestLogLevelChange(t *testing.T) {
 	config := DefaultConfig().
-		WithAppName("test-debug").
-		WithLogDir("test-logs-debug").
-		WithDebug(false) // Start in production mode
+		WithAppName("test-level").
+		WithLogDir("test-logs-level").
+		WithLogLevel(slog.LevelWarn) // Start with WARN level
 
 	logger, err := New(config)
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
 	defer logger.Close()
-	defer os.RemoveAll("test-logs-debug")
+	defer os.RemoveAll("test-logs-level")
 
-	if logger.config.Debug {
-		t.Error("Expected debug mode to be disabled initially")
+	if logger.config.LogLevel != slog.LevelWarn {
+		t.Error("Expected log level to be WARN initially")
 	}
 
-	err = logger.SetDebug(true)
+	err = logger.SetLevel(slog.LevelDebug)
 	if err != nil {
-		t.Errorf("Failed to enable debug mode: %v", err)
+		t.Errorf("Failed to change log level: %v", err)
 	}
 
-	if !logger.config.Debug {
-		t.Error("Expected debug mode to be enabled after SetDebug(true)")
+	if logger.config.LogLevel != slog.LevelDebug {
+		t.Error("Expected log level to be DEBUG after SetLevel(DEBUG)")
 	}
 }
 
@@ -93,7 +93,7 @@ func TestWith(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("test-with").
 		WithLogDir("test-logs-with").
-		WithDebug(true)
+		WithLogLevel(slog.LevelDebug)
 
 	logger, err := New(config)
 	if err != nil {
@@ -112,7 +112,7 @@ func TestGlobalLogger(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("test-global").
 		WithLogDir("test-logs-global").
-		WithDebug(true)
+		WithLogLevel(slog.LevelDebug)
 
 	err := Init(config)
 	if err != nil {
@@ -136,7 +136,7 @@ func TestConfigBuilder(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("builder-test").
 		WithLogDir("builder-logs").
-		WithDebug(true).
+		WithLogLevel(slog.LevelDebug).
 		WithRetentionDays(14).
 		WithJSONFormat(true).
 		WithTimeFormat("2006-01-02 15:04:05").
@@ -150,8 +150,8 @@ func TestConfigBuilder(t *testing.T) {
 		t.Errorf("Expected log dir 'builder-logs', got '%s'", config.LogDir)
 	}
 
-	if !config.Debug {
-		t.Error("Expected debug mode to be enabled")
+	if config.LogLevel != slog.LevelDebug {
+		t.Error("Expected log level to be DEBUG")
 	}
 
 	if config.RetentionDays != 14 {
@@ -175,7 +175,7 @@ func TestFileRotation(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("test-rotation").
 		WithLogDir("test-logs-rotation").
-		WithDebug(true)
+		WithLogLevel(slog.LevelDebug)
 
 	logger, err := New(config)
 	if err != nil {
@@ -308,7 +308,7 @@ func BenchmarkLogging(b *testing.B) {
 	config := DefaultConfig().
 		WithAppName("bench").
 		WithLogDir("bench-logs").
-		WithDebug(true)
+		WithLogLevel(slog.LevelDebug)
 
 	logger, err := New(config)
 	if err != nil {
@@ -332,7 +332,7 @@ func TestLogger_BufferedWrites(t *testing.T) {
 	config := DefaultConfig().
 		WithLogDir(tempDir).
 		WithAppName("buffer_test").
-		WithDebug(true). // Enable debug to see INFO messages
+		WithLogLevel(slog.LevelDebug). // Enable debug to see INFO messages
 		WithBufferSize(1024).
 		WithFlushInterval(100 * time.Millisecond).
 		WithFlushOnLevel(slog.LevelError)
@@ -391,8 +391,8 @@ func TestLogger_BufferedWritesWithoutBuffering(t *testing.T) {
 	config := DefaultConfig().
 		WithLogDir(tempDir).
 		WithAppName("nobuffer_test").
-		WithDebug(true).   // Enable debug to see INFO messages
-		WithoutBuffering() // Disable buffering
+		WithLogLevel(slog.LevelDebug). // Enable debug to see INFO messages
+		WithoutBuffering()             // Disable buffering
 
 	l, err := New(config)
 	if err != nil {
@@ -432,7 +432,7 @@ func TestLogger_BufferedWritesAutoFlush(t *testing.T) {
 	config := DefaultConfig().
 		WithLogDir(tempDir).
 		WithAppName("autoflush_test").
-		WithDebug(true). // Enable debug to see INFO messages
+		WithLogLevel(slog.LevelDebug). // Enable debug to see INFO messages
 		WithBufferSize(1024).
 		WithFlushInterval(50 * time.Millisecond) // Very short interval
 

@@ -7,14 +7,14 @@ import (
 )
 
 type Config struct {
-	LogDir        string // Directory for log files
-	AppName       string // Application name for log file prefix
-	Debug         bool   // Enable debug logging
-	RetentionDays int    // Number of days to keep log files
-	JSONFormat    bool   // Use JSON format instead of text
-	AddSource     bool   // Add source file and line info
-	TimeFormat    string // Custom time format
-	ConsoleOutput bool   // Enable output to console (stdout/stderr)
+	LogDir        string     // Directory for log files
+	AppName       string     // Application name for log file prefix
+	LogLevel      slog.Level // Minimum log level (DEBUG, INFO, WARN, ERROR)
+	RetentionDays int        // Number of days to keep log files
+	JSONFormat    bool       // Use JSON format instead of text
+	AddSource     bool       // Add source file and line info
+	TimeFormat    string     // Custom time format
+	ConsoleOutput bool       // Enable output to console (stdout/stderr)
 
 	// Buffering configuration
 	BufferSize    int           // Buffer size in bytes (0 = no buffering)
@@ -29,7 +29,7 @@ func DefaultConfig() Config {
 	return Config{
 		LogDir:        "logs",
 		AppName:       "app",
-		Debug:         false,
+		LogLevel:      slog.LevelInfo, // INFO and above by default
 		RetentionDays: 7,
 		JSONFormat:    false,
 		AddSource:     false,
@@ -42,9 +42,9 @@ func DefaultConfig() Config {
 	}
 }
 
-// WithDebug enables debug logging
-func (c Config) WithDebug(debug bool) Config {
-	c.Debug = debug
+// WithLogLevel sets the minimum log level
+func (c Config) WithLogLevel(level slog.Level) Config {
+	c.LogLevel = level
 	return c
 }
 

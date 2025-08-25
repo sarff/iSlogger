@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -27,7 +28,7 @@ func main() {
 	// Initialize logger for web application
 	config := iSlogger.DefaultConfig().
 		WithAppName("webapp").
-		WithDebug(false). // Production mode
+		WithLogLevel(slog.LevelWarn). // Production mode
 		WithLogDir("web-logs").
 		WithJSONFormat(true) // JSON format for log aggregation
 

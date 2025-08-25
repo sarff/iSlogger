@@ -128,18 +128,6 @@ func SetLevel(level slog.Level) error {
 	return nil
 }
 
-// SetDebug enables or disables debug mode for the global logger
-func SetDebug(debug bool) error {
-	globalMu.RLock()
-	logger := defaultLogger
-	globalMu.RUnlock()
-
-	if logger != nil {
-		return logger.SetDebug(debug)
-	}
-	return nil
-}
-
 // Flush flushes all buffers of the global logger
 func Flush() error {
 	globalMu.RLock()
