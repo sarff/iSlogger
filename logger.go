@@ -104,13 +104,16 @@ func (l *Logger) initLoggers() error {
 	var err error
 	today := time.Now().Format("2006-01-02")
 
-	// Open info log file
-	infoPath := filepath.Join(l.config.LogDir, fmt.Sprintf("%s_%s.log", l.config.AppName, today))
+	baseDir, err := filepath.Abs(l.config.LogDir)
+	if err != nil {
+		return fmt.Errorf("resolve log dir: %w", err)
+	}
 
-	// FIX: G304: Potential file inclusion via variable
-	cleanPath := filepath.Clean(infoPath)
-	if !strings.HasPrefix(cleanPath, l.config.LogDir) {
-		return fmt.Errorf("invalid log file path: %s", cleanPath)
+	// Open info log file
+	infoPath := filepath.Join(baseDir, fmt.Sprintf("%s_%s.log", l.config.AppName, today))
+
+	if rel, err := filepath.Rel(baseDir, infoPath); err != nil || strings.HasPrefix(rel, "..") {
+		return fmt.Errorf("invalid log file path: %s", infoPath)
 	}
 
 	l.infoFile, err = os.OpenFile(infoPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
@@ -119,12 +122,9 @@ func (l *Logger) initLoggers() error {
 	}
 
 	// Open error log file
-	errorPath := filepath.Join(l.config.LogDir, fmt.Sprintf("%s_error_%s.log", l.config.AppName, today))
-
-	// FIX: G304: Potential file inclusion via variable
-	cleanErrorPath := filepath.Clean(errorPath)
-	if !strings.HasPrefix(cleanErrorPath, l.config.LogDir) {
-		return fmt.Errorf("invalid log file path: %s", cleanPath)
+	errorPath := filepath.Join(baseDir, fmt.Sprintf("%s_error_%s.log", l.config.AppName, today))
+	if rel, err := filepath.Rel(baseDir, errorPath); err != nil || strings.HasPrefix(rel, "..") {
+		return fmt.Errorf("invalid log_error file path: %s", errorPath)
 	}
 
 	l.errorFile, err = os.OpenFile(errorPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
