@@ -20,6 +20,10 @@ type User struct {
 	Name string `json:"name"`
 }
 
+type contextKey string
+
+const loggerContextKey contextKey = "logger"
+
 type Server struct {
 	logger *iSlogger.Logger
 }
@@ -115,7 +119,7 @@ func (s *Server) loggingMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		// Call next handler
-		next(wrapper, r.WithContext(context.WithValue(r.Context(), "logger", requestLogger)))
+		next(wrapper, r.WithContext(context.WithValue(r.Context(), loggerContextKey, requestLogger)))
 
 		// Log request completion
 		duration := time.Since(start)
@@ -163,7 +167,7 @@ func (rw *responseWriter) WriteHeader(code int) {
 
 // getLogger extracts logger from request context
 func getLogger(r *http.Request) *iSlogger.Logger {
-	if logger, ok := r.Context().Value("logger").(*iSlogger.Logger); ok {
+	if logger, ok := r.Context().Value(loggerContextKey).(*iSlogger.Logger); ok {
 		return logger
 	}
 	return iSlogger.GetGlobalLogger()

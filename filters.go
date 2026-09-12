@@ -1,46 +1,40 @@
 package iSlogger
 
 import (
+	"fmt"
 	"log/slog"
 	"regexp"
 	"strings"
 	"time"
 )
 
-// LogCondition defines a function that determines whether a log entry should be written
+// LogCondition decides whether a record is accepted.
 type LogCondition func(level slog.Level, msg string, attrs []slog.Attr) bool
 
-// FieldFilter defines a function that filters/modifies field values
+// FieldFilter transforms an attribute value.
 type FieldFilter func(key string, value slog.Value) slog.Value
 
-// FilterConfig holds all filtering configuration
+// FilterConfig groups conditional, field, regex, and rate-limit settings.
 type FilterConfig struct {
-	// Conditional logging
-	Conditions []LogCondition
-
-	// Field filters
+	Conditions   []LogCondition
 	FieldFilters map[string]FieldFilter
 	RegexFilters []RegexFilter
-
-	// Rate limiting
-	RateLimits map[slog.Level]RateLimit
+	RateLimits   map[slog.Level]RateLimit
 }
 
-// RegexFilter defines a regex-based field filter
+// RegexFilter replaces matches in every string attribute value.
 type RegexFilter struct {
 	Pattern     *regexp.Regexp
 	Replacement string
 }
 
-// RateLimit defines rate limiting configuration
+// RateLimit defines a fixed-window limit for an exact slog level.
 type RateLimit struct {
-	MaxCount  int           // Maximum number of logs per period
-	Period    time.Duration // Time period for rate limiting
-	counter   int64         // Internal counter
-	lastReset time.Time     // Internal last reset time
+	MaxCount int
+	Period   time.Duration
 }
 
-// DefaultFilterConfig returns default filter configuration
+// DefaultFilterConfig returns filtering with no restrictions.
 func DefaultFilterConfig() FilterConfig {
 	return FilterConfig{
 		Conditions:   []LogCondition{},
@@ -50,71 +44,78 @@ func DefaultFilterConfig() FilterConfig {
 	}
 }
 
-// Common field filters
-
-// MaskFieldFilter masks a field with the given mask
+// MaskFieldFilter returns a filter that replaces a value with mask.
 func MaskFieldFilter(mask string) FieldFilter {
-	return func(key string, value slog.Value) slog.Value {
-		return slog.StringValue(mask)
-	}
+	return func(string, slog.Value) slog.Value { return slog.StringValue(mask) }
 }
 
-// RedactFieldFilter completely removes the field by setting it to empty
+type redactedValue struct{}
+
+func (redactedValue) String() string { return "" }
+
+// RedactFieldFilter returns a filter that removes an attribute.
 func RedactFieldFilter() FieldFilter {
-	return func(key string, value slog.Value) slog.Value {
-		return slog.StringValue("")
-	}
+	return func(string, slog.Value) slog.Value { return slog.AnyValue(redactedValue{}) }
 }
 
-// RegexMaskFilter creates a regex filter that masks matching patterns
-func RegexMaskFilter(pattern string, mask string) RegexFilter {
-	return RegexFilter{
-		Pattern:     regexp.MustCompile(pattern),
-		Replacement: mask,
+// NewRegexFilter compiles a safe regex filter.
+func NewRegexFilter(pattern, replacement string) (RegexFilter, error) {
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return RegexFilter{}, fmt.Errorf("compile regex filter: %w", err)
 	}
+	return RegexFilter{Pattern: re, Replacement: replacement}, nil
 }
 
-// Common conditions
+// RegexMaskFilter creates a regex filter that masks matching patterns.
+// Deprecated: use NewRegexFilter to handle invalid patterns without a panic.
+func RegexMaskFilter(pattern, mask string) RegexFilter {
+	filter, err := NewRegexFilter(pattern, mask)
+	if err != nil {
+		panic(err)
+	}
+	return filter
+}
 
-// LevelCondition creates a condition that only allows logs at or above specified level
+// LevelCondition accepts records at or above minLevel.
 func LevelCondition(minLevel slog.Level) LogCondition {
-	return func(level slog.Level, msg string, attrs []slog.Attr) bool {
-		return level >= minLevel
-	}
+	return func(level slog.Level, _ string, _ []slog.Attr) bool { return level >= minLevel }
 }
 
-// MessageContainsCondition creates a condition based on message content
+// MessageContainsCondition accepts messages containing substring.
 func MessageContainsCondition(substring string) LogCondition {
-	return func(level slog.Level, msg string, attrs []slog.Attr) bool {
-		return strings.Contains(msg, substring)
+	return func(_ slog.Level, msg string, _ []slog.Attr) bool { return strings.Contains(msg, substring) }
+}
+
+// AttributeCondition accepts records with a matching attribute.
+func AttributeCondition(key, expectedValue string) LogCondition {
+	return func(_ slog.Level, _ string, attrs []slog.Attr) bool {
+		return walkAttrs(attrs, func(attr slog.Attr) bool {
+			return attr.Key == key && attr.Value.Resolve().String() == expectedValue
+		})
 	}
 }
 
-// AttributeCondition creates a condition based on attribute values
-func AttributeCondition(key string, expectedValue string) LogCondition {
-	return func(level slog.Level, msg string, attrs []slog.Attr) bool {
-		for _, attr := range attrs {
-			if attr.Key == key && attr.Value.String() == expectedValue {
-				return true
-			}
-		}
-		return false
-	}
-}
-
-// TimeBasedCondition creates a condition based on time of day
+// TimeBasedCondition allows [startHour, endHour). An interval that crosses
+// midnight is supported; equal hours mean the whole day.
 func TimeBasedCondition(startHour, endHour int) LogCondition {
-	return func(level slog.Level, msg string, attrs []slog.Attr) bool {
+	return func(_ slog.Level, _ string, _ []slog.Attr) bool {
 		hour := time.Now().Hour()
-		return hour >= startHour && hour <= endHour
+		if startHour == endHour {
+			return true
+		}
+		if startHour < endHour {
+			return hour >= startHour && hour < endHour
+		}
+		return hour >= startHour || hour < endHour
 	}
 }
 
-// CombineConditions combines multiple conditions with AND logic
+// CombineConditions combines conditions with AND semantics.
 func CombineConditions(conditions ...LogCondition) LogCondition {
 	return func(level slog.Level, msg string, attrs []slog.Attr) bool {
 		for _, condition := range conditions {
-			if !condition(level, msg, attrs) {
+			if condition == nil || !condition(level, msg, attrs) {
 				return false
 			}
 		}
@@ -122,14 +123,27 @@ func CombineConditions(conditions ...LogCondition) LogCondition {
 	}
 }
 
-// AnyCondition combines multiple conditions with OR logic
+// AnyCondition combines conditions with OR semantics.
 func AnyCondition(conditions ...LogCondition) LogCondition {
 	return func(level slog.Level, msg string, attrs []slog.Attr) bool {
 		for _, condition := range conditions {
-			if condition(level, msg, attrs) {
+			if condition != nil && condition(level, msg, attrs) {
 				return true
 			}
 		}
 		return false
 	}
+}
+
+func walkAttrs(attrs []slog.Attr, match func(slog.Attr) bool) bool {
+	for _, attr := range attrs {
+		attr.Value = attr.Value.Resolve()
+		if match(attr) {
+			return true
+		}
+		if attr.Value.Kind() == slog.KindGroup && walkAttrs(attr.Value.Group(), match) {
+			return true
+		}
+	}
+	return false
 }

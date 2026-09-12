@@ -19,7 +19,7 @@ func TestConsoleOutput_Enabled(t *testing.T) {
 
 	config := DefaultConfig().
 		WithAppName("console-test").
-		WithLogDir("test-logs").
+		WithLogDir(t.TempDir()).
 		WithConsoleOutput(true).
 		WithLogLevel(slog.LevelDebug)
 
@@ -56,7 +56,7 @@ func TestConsoleOutput_Disabled(t *testing.T) {
 
 	config := DefaultConfig().
 		WithAppName("console-test-disabled").
-		WithLogDir("test-logs").
+		WithLogDir(t.TempDir()).
 		WithConsoleOutput(false).
 		WithLogLevel(slog.LevelDebug)
 
@@ -79,6 +79,46 @@ func TestConsoleOutput_Disabled(t *testing.T) {
 	// Verify message does NOT appear in console output
 	if strings.Contains(output, testMessage) {
 		t.Errorf("Expected console output to NOT contain %q when console output is disabled, but got: %s", testMessage, output)
+	}
+}
+
+func TestConsoleOutput_RoutesEachRecordOnce(t *testing.T) {
+	oldStdout, oldStderr := os.Stdout, os.Stderr
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout, os.Stderr = stdoutW, stderrW
+	defer func() { os.Stdout, os.Stderr = oldStdout, oldStderr }()
+
+	logger, err := New(DefaultConfig().
+		WithLogDir(t.TempDir()).
+		WithAppName("console-routing").
+		WithConsoleOutput(true).
+		WithoutBuffering())
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger.Info("stdout-record")
+	logger.Warn("stderr-record")
+	if err := logger.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_ = stdoutW.Close()
+	_ = stderrW.Close()
+
+	var stdout, stderr bytes.Buffer
+	_, _ = stdout.ReadFrom(stdoutR)
+	_, _ = stderr.ReadFrom(stderrR)
+	if strings.Count(stdout.String(), "stdout-record") != 1 || strings.Contains(stdout.String(), "stderr-record") {
+		t.Fatalf("unexpected stdout: %s", stdout.String())
+	}
+	if strings.Count(stderr.String(), "stderr-record") != 1 || strings.Contains(stderr.String(), "stdout-record") {
+		t.Fatalf("unexpected stderr: %s", stderr.String())
 	}
 }
 

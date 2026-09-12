@@ -1,189 +1,217 @@
 package iSlogger
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
-	"regexp"
+	"strings"
 	"time"
 )
 
+// Config controls file output, formatting, buffering, and filtering.
 type Config struct {
-	LogDir        string     // Directory for log files
-	AppName       string     // Application name for log file prefix
-	LogLevel      slog.Level // Minimum log level (DEBUG, INFO, WARN, ERROR)
-	RetentionDays int        // Number of days to keep log files
-	JSONFormat    bool       // Use JSON format instead of text
-	AddSource     bool       // Add source file and line info
-	TimeFormat    string     // Custom time format
-	ConsoleOutput bool       // Enable output to console (stdout/stderr)
+	LogDir        string
+	AppName       string
+	LogLevel      slog.Level
+	RetentionDays int
+	JSONFormat    bool
+	AddSource     bool
+	TimeFormat    string
+	ConsoleOutput bool
 
-	// Buffering configuration
-	BufferSize    int           // Buffer size in bytes (0 = no buffering)
-	FlushInterval time.Duration // Time interval for automatic buffer flushing
-	FlushOnLevel  slog.Level    // Flush buffer immediately for logs at or above this level
+	BufferSize    int
+	FlushInterval time.Duration
+	FlushOnLevel  slog.Level
 
-	// Filtering configuration
-	Filters FilterConfig // Filtering and conditional logging configuration
+	Filters FilterConfig
+
+	validationErr error
 }
 
+// DefaultConfig returns a production-ready configuration with console output
+// and buffered daily files in the logs directory.
 func DefaultConfig() Config {
 	return Config{
 		LogDir:        "logs",
 		AppName:       "app",
-		LogLevel:      slog.LevelInfo, // INFO and above by default
+		LogLevel:      slog.LevelInfo,
 		RetentionDays: 7,
-		JSONFormat:    false,
-		AddSource:     false,
-		TimeFormat:    time.RFC3339,    // "2006-01-02T15:04:05Z07:00"
-		ConsoleOutput: true,            // Enable console output by default
-		BufferSize:    8192,            // 8KB buffer by default
-		FlushInterval: 5 * time.Second, // Flush every 5 seconds
-		FlushOnLevel:  slog.LevelError, // Immediately flush errors
+		TimeFormat:    time.RFC3339,
+		ConsoleOutput: true,
+		BufferSize:    8192,
+		FlushInterval: 5 * time.Second,
+		FlushOnLevel:  slog.LevelError,
 		Filters:       DefaultFilterConfig(),
 	}
 }
 
-// WithLogLevel sets the minimum log level
-func (c Config) WithLogLevel(level slog.Level) Config {
-	c.LogLevel = level
+func (c Config) withDefaults() Config {
+	if c.LogDir == "" {
+		c.LogDir = "logs"
+	}
+	if c.AppName == "" {
+		c.AppName = "app"
+	}
+	if c.RetentionDays == 0 {
+		c.RetentionDays = 7
+	}
+	if c.TimeFormat == "" {
+		c.TimeFormat = time.RFC3339
+	}
 	return c
 }
 
-// WithLogDir sets the log directory
-func (c Config) WithLogDir(dir string) Config {
-	c.LogDir = dir
+// Validate checks configuration values without creating a logger.
+func (c Config) Validate() error {
+	var errs []error
+	if c.validationErr != nil {
+		errs = append(errs, c.validationErr)
+	}
+	if c.RetentionDays < 0 {
+		errs = append(errs, fmt.Errorf("retention days must not be negative"))
+	}
+	if c.BufferSize < 0 {
+		errs = append(errs, fmt.Errorf("buffer size must not be negative"))
+	}
+	if c.FlushInterval < 0 {
+		errs = append(errs, fmt.Errorf("flush interval must not be negative"))
+	}
+	if c.AppName == "." || c.AppName == ".." || strings.ContainsAny(c.AppName, "/\\\x00") {
+		errs = append(errs, fmt.Errorf("app name must be a file-name component"))
+	}
+	for i, condition := range c.Filters.Conditions {
+		if condition == nil {
+			errs = append(errs, fmt.Errorf("condition %d is nil", i))
+		}
+	}
+	for key, filter := range c.Filters.FieldFilters {
+		if filter == nil {
+			errs = append(errs, fmt.Errorf("field filter %q is nil", key))
+		}
+	}
+	for i, filter := range c.Filters.RegexFilters {
+		if filter.Pattern == nil {
+			errs = append(errs, fmt.Errorf("regex filter %d has a nil pattern", i))
+		}
+	}
+	for level, limit := range c.Filters.RateLimits {
+		if limit.MaxCount <= 0 || limit.Period <= 0 {
+			errs = append(errs, fmt.Errorf("rate limit for %s requires a positive count and period", level))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// WithLogLevel sets the minimum enabled level.
+func (c Config) WithLogLevel(level slog.Level) Config { c.LogLevel = level; return c }
+
+// WithLogDir sets the directory used for daily files.
+func (c Config) WithLogDir(dir string) Config { c.LogDir = dir; return c }
+
+// WithAppName sets the file-name prefix.
+func (c Config) WithAppName(name string) Config { c.AppName = name; return c }
+
+// WithRetentionDays sets the number of previous calendar days to retain.
+func (c Config) WithRetentionDays(days int) Config { c.RetentionDays = days; return c }
+
+// WithJSONFormat selects JSON output when enabled and text output otherwise.
+func (c Config) WithJSONFormat(json bool) Config { c.JSONFormat = json; return c }
+
+// WithTimeFormat sets the Go layout used for record timestamps.
+func (c Config) WithTimeFormat(format string) Config { c.TimeFormat = format; return c }
+
+// WithAddSource includes the caller's file and line when enabled.
+func (c Config) WithAddSource(source bool) Config { c.AddSource = source; return c }
+
+// WithConsoleOutput enables or disables stdout/stderr output.
+func (c Config) WithConsoleOutput(enabled bool) Config {
+	c.ConsoleOutput = enabled
 	return c
 }
 
-// WithAppName sets the application name
-func (c Config) WithAppName(name string) Config {
-	c.AppName = name
-	return c
-}
-
-// WithRetentionDays sets the retention period
-func (c Config) WithRetentionDays(days int) Config {
-	c.RetentionDays = days
-	return c
-}
-
-// WithJSONFormat enables JSON format
-func (c Config) WithJSONFormat(json bool) Config {
-	c.JSONFormat = json
-	return c
-}
-
-// WithTimeFormat sets custom time format
-func (c Config) WithTimeFormat(format string) Config {
-	c.TimeFormat = format
-	return c
-}
-
-// WithAddSource enables Source
-func (c Config) WithAddSource(source bool) Config {
-	c.AddSource = source
-	return c
-}
-
-// WithConsoleOutput enables or disables console output
-func (c Config) WithConsoleOutput(console bool) Config {
-	c.ConsoleOutput = console
-	return c
-}
-
-// Filtering configuration methods
-
-// WithCondition adds a conditional logging function
+// WithCondition adds a condition; all added conditions must pass.
 func (c Config) WithCondition(condition LogCondition) Config {
+	c.Filters = cloneFilterConfig(c.Filters)
 	c.Filters.Conditions = append(c.Filters.Conditions, condition)
 	return c
 }
 
-// WithFieldFilter adds a field filter for a specific key
+// WithFieldFilter adds a filter for an attribute key.
 func (c Config) WithFieldFilter(key string, filter FieldFilter) Config {
-	if c.Filters.FieldFilters == nil {
-		c.Filters.FieldFilters = make(map[string]FieldFilter)
-	}
+	c.Filters = cloneFilterConfig(c.Filters)
 	c.Filters.FieldFilters[key] = filter
 	return c
 }
 
-// WithFieldMask masks a field with the given mask string
-func (c Config) WithFieldMask(key string, mask string) Config {
+// WithFieldMask replaces the value of key with mask.
+func (c Config) WithFieldMask(key, mask string) Config {
 	return c.WithFieldFilter(key, MaskFieldFilter(mask))
 }
 
-// WithFieldRedaction completely removes a field
+// WithFieldRedaction removes attributes with key.
 func (c Config) WithFieldRedaction(key string) Config {
 	return c.WithFieldFilter(key, RedactFieldFilter())
 }
 
-// WithRegexFilter adds a regex-based filter
-func (c Config) WithRegexFilter(pattern string, replacement string) Config {
-	regex, err := regexp.Compile(pattern)
+// WithRegexFilter replaces pattern matches in string attribute values.
+func (c Config) WithRegexFilter(pattern, replacement string) Config {
+	c.Filters = cloneFilterConfig(c.Filters)
+	filter, err := NewRegexFilter(pattern, replacement)
 	if err != nil {
-		// Skip invalid regex patterns
+		c.validationErr = errors.Join(c.validationErr, err)
 		return c
 	}
-	c.Filters.RegexFilters = append(c.Filters.RegexFilters, RegexFilter{
-		Pattern:     regex,
-		Replacement: replacement,
-	})
+	c.Filters.RegexFilters = append(c.Filters.RegexFilters, filter)
 	return c
 }
 
-// WithRateLimit adds rate limiting for a specific log level
+// WithRateLimit limits accepted records at an exact level in each period.
 func (c Config) WithRateLimit(level slog.Level, maxCount int, period time.Duration) Config {
-	if c.Filters.RateLimits == nil {
-		c.Filters.RateLimits = make(map[slog.Level]RateLimit)
-	}
-	c.Filters.RateLimits[level] = RateLimit{
-		MaxCount: maxCount,
-		Period:   period,
-	}
+	c.Filters = cloneFilterConfig(c.Filters)
+	c.Filters.RateLimits[level] = RateLimit{MaxCount: maxCount, Period: period}
 	return c
 }
 
-// WithLevelCondition adds a minimum level condition
-func (c Config) WithLevelCondition(minLevel slog.Level) Config {
-	return c.WithCondition(LevelCondition(minLevel))
+// WithLevelCondition requires records to be at or above level.
+func (c Config) WithLevelCondition(level slog.Level) Config {
+	return c.WithCondition(LevelCondition(level))
 }
 
-// WithMessageContainsCondition adds a message content condition
+// WithMessageContainsCondition requires the message to contain substring.
 func (c Config) WithMessageContainsCondition(substring string) Config {
 	return c.WithCondition(MessageContainsCondition(substring))
 }
 
-// WithAttributeCondition adds an attribute-based condition
+// WithAttributeCondition requires a matching attribute, including bound and grouped attributes.
 func (c Config) WithAttributeCondition(key, value string) Config {
 	return c.WithCondition(AttributeCondition(key, value))
 }
 
-// WithTimeBasedCondition adds a time-based condition
+// WithTimeBasedCondition allows records in the local-time interval [startHour, endHour).
 func (c Config) WithTimeBasedCondition(startHour, endHour int) Config {
+	if startHour < 0 || startHour > 23 || endHour < 0 || endHour > 23 {
+		c.validationErr = errors.Join(c.validationErr, fmt.Errorf("time-based condition hours must be between 0 and 23"))
+		return c
+	}
 	return c.WithCondition(TimeBasedCondition(startHour, endHour))
 }
 
-// Buffering configuration methods
+// WithBufferSize sets the buffer threshold in bytes; zero disables buffering.
+func (c Config) WithBufferSize(size int) Config { c.BufferSize = size; return c }
 
-// WithBufferSize sets the buffer size in bytes (0 disables buffering)
-func (c Config) WithBufferSize(size int) Config {
-	c.BufferSize = size
-	return c
-}
-
-// WithFlushInterval sets the automatic flush interval
+// WithFlushInterval sets the periodic buffer flush interval; zero disables it.
 func (c Config) WithFlushInterval(interval time.Duration) Config {
 	c.FlushInterval = interval
 	return c
 }
 
-// WithFlushOnLevel sets the minimum level that triggers immediate flush
-func (c Config) WithFlushOnLevel(level slog.Level) Config {
-	c.FlushOnLevel = level
-	return c
-}
+// WithFlushOnLevel flushes file buffers after a record at or above level.
+func (c Config) WithFlushOnLevel(level slog.Level) Config { c.FlushOnLevel = level; return c }
 
-// WithBuffering enables buffering with default settings
+// WithoutBuffering writes each record directly to its files.
+func (c Config) WithoutBuffering() Config { c.BufferSize = 0; return c }
+
+// WithBuffering restores the default buffering settings.
 func (c Config) WithBuffering() Config {
 	c.BufferSize = 8192
 	c.FlushInterval = 5 * time.Second
@@ -191,8 +219,18 @@ func (c Config) WithBuffering() Config {
 	return c
 }
 
-// WithoutBuffering disables buffering
-func (c Config) WithoutBuffering() Config {
-	c.BufferSize = 0
-	return c
+func cloneFilterConfig(src FilterConfig) FilterConfig {
+	dst := FilterConfig{
+		Conditions:   append([]LogCondition(nil), src.Conditions...),
+		RegexFilters: append([]RegexFilter(nil), src.RegexFilters...),
+		FieldFilters: make(map[string]FieldFilter, len(src.FieldFilters)),
+		RateLimits:   make(map[slog.Level]RateLimit, len(src.RateLimits)),
+	}
+	for key, filter := range src.FieldFilters {
+		dst.FieldFilters[key] = filter
+	}
+	for level, limit := range src.RateLimits {
+		dst.RateLimits[level] = limit
+	}
+	return dst
 }

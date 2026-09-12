@@ -1,6 +1,7 @@
 package iSlogger
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,127 +9,122 @@ import (
 	"time"
 )
 
-// startCleanupRoutine starts the cleanup goroutine
-func (l *Logger) startCleanupRoutine() {
+func (c *loggerCore) cleanupLoop() {
+	defer c.cleanupWG.Done()
+	_ = c.cleanup()
 	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
-
-	l.performCleanup()
-
-	//lint:ignore S1000 more idiomatic for select with multiple cases
 	for {
 		select {
 		case <-ticker.C:
-			l.performCleanup()
+			_ = c.cleanup()
+		case <-c.stopCleanup:
+			return
 		}
 	}
 }
 
-// performCleanup removes old log files
-func (l *Logger) performCleanup() {
-	cutoffDate := time.Now().AddDate(0, 0, -l.config.RetentionDays)
+func (c *loggerCore) cleanup() error {
+	c.cleanupMu.Lock()
+	defer c.cleanupMu.Unlock()
 
-	entries, err := os.ReadDir(l.config.LogDir)
-	if err != nil {
-		if l.errorLogger != nil {
-			l.Error("Failed to read log directory", "error", err)
-		}
-		return
+	c.mu.RLock()
+	if c.closed {
+		c.mu.RUnlock()
+		return nil
 	}
+	config := c.config
+	baseDir := c.baseDir
+	activeDate := c.currentDate
+	now := c.now()
+	c.mu.RUnlock()
 
+	entries, err := os.ReadDir(baseDir)
+	if err != nil {
+		return fmt.Errorf("read log directory: %w", err)
+	}
+	cutoff := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, -config.RetentionDays)
+	var errs []error
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
-
-		if !l.isOurLogFile(entry.Name()) {
+		date, ok := logFileDate(config.AppName, entry.Name())
+		if !ok || date == activeDate {
 			continue
 		}
-
-		filePath := filepath.Join(l.config.LogDir, entry.Name())
-		if l.shouldRemoveFile(entry, cutoffDate) {
-			if err := os.Remove(filePath); err != nil {
-				if l.errorLogger != nil {
-					l.Error("Failed to remove old log file", "file", entry.Name(), "error", err)
-				}
-			} else {
-				if l.infoLogger != nil {
-					l.Info("Removed old log file", "file", entry.Name())
-				}
-			}
+		parsed, err := time.ParseInLocation(time.DateOnly, date, now.Location())
+		if err != nil || !parsed.Before(cutoff) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(baseDir, entry.Name())); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, fmt.Errorf("remove %s: %w", entry.Name(), err))
 		}
 	}
+	return errors.Join(errs...)
 }
 
-// isOurLogFile checks if the file belongs to this logger instance
-func (l *Logger) isOurLogFile(filename string) bool {
-	if !strings.HasPrefix(filename, l.config.AppName) {
-		return false
-	}
-
+func logFileDate(appName, filename string) (string, bool) {
 	if !strings.HasSuffix(filename, ".log") {
-		return false
+		return "", false
 	}
-
-	expectedPatterns := []string{
-		l.config.AppName + "_",       // app_2024-01-01.log
-		l.config.AppName + "_error_", // app_error_2024-01-01.log
-	}
-
-	for _, pattern := range expectedPatterns {
-		if strings.HasPrefix(filename, pattern) {
-			return true
+	stem := strings.TrimSuffix(filename, ".log")
+	prefixes := []string{appName + "_error_", appName + "_"}
+	for _, prefix := range prefixes {
+		if !strings.HasPrefix(stem, prefix) {
+			continue
+		}
+		date := strings.TrimPrefix(stem, prefix)
+		if _, err := time.Parse(time.DateOnly, date); err == nil {
+			return date, true
 		}
 	}
-
-	return false
+	return "", false
 }
 
-// shouldRemoveFile determines if a file should be removed based on age
-func (l *Logger) shouldRemoveFile(entry os.DirEntry, cutoffDate time.Time) bool {
-	info, err := entry.Info()
-	if err != nil {
-		return false
+func (l *Logger) isOurLogFile(filename string) bool {
+	_, ok := logFileDate(l.config.AppName, filename)
+	return ok
+}
+
+// Cleanup removes expired log files synchronously.
+func (l *Logger) Cleanup() error {
+	if l == nil || l.core == nil {
+		return nil
 	}
-
-	return info.ModTime().Before(cutoffDate)
+	return l.core.cleanup()
 }
 
-// CleanupNow performs immediate cleanup of old log files
-func (l *Logger) CleanupNow() {
-	go l.performCleanup()
-}
+// CleanupNow is retained for compatibility.
+// Deprecated: use Cleanup to receive any filesystem error.
+func (l *Logger) CleanupNow() { _ = l.Cleanup() }
 
-// GetLogFiles returns list of current log files
+// GetLogFiles returns strictly named log files for this application.
 func (l *Logger) GetLogFiles() ([]string, error) {
-	entries, err := os.ReadDir(l.config.LogDir)
+	if l == nil || l.core == nil {
+		return nil, nil
+	}
+	entries, err := os.ReadDir(l.core.baseDir)
 	if err != nil {
 		return nil, err
 	}
-
-	var logFiles []string
+	files := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		if l.isOurLogFile(entry.Name()) {
-			logFiles = append(logFiles, entry.Name())
+		if !entry.IsDir() && l.isOurLogFile(entry.Name()) {
+			files = append(files, entry.Name())
 		}
 	}
-
-	return logFiles, nil
+	return files, nil
 }
 
-// GetCurrentLogPaths returns paths to current log files
+// GetCurrentLogPaths returns the configured paths for the open daily files.
 func (l *Logger) GetCurrentLogPaths() (infoPath, errorPath string) {
-	today := time.Now().Format("2006-01-02")
-	infoPath = filepath.Join(l.config.LogDir, fmt.Sprintf("%s_%s.log", l.config.AppName, today))
-	errorPath = filepath.Join(l.config.LogDir, fmt.Sprintf("%s_error_%s.log", l.config.AppName, today))
-	return
-}
-
-// RotateNow forces immediate log rotation
-func (l *Logger) RotateNow() error {
-	return l.initLoggers()
+	if l == nil || l.core == nil {
+		return "", ""
+	}
+	l.core.mu.RLock()
+	date := l.core.currentDate
+	l.core.mu.RUnlock()
+	return filepath.Join(l.config.LogDir, fmt.Sprintf("%s_%s.log", l.config.AppName, date)),
+		filepath.Join(l.config.LogDir, fmt.Sprintf("%s_error_%s.log", l.config.AppName, date))
 }

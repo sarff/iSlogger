@@ -2,336 +2,346 @@ package iSlogger
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
+	"runtime"
 	"sync"
 	"time"
 )
 
-// levelFilterWriter filters logs by level
-type levelFilterWriter struct {
-	writer   io.Writer
-	maxLevel slog.Level // Maximum level to write (inclusive)
-}
-
-func (lfw *levelFilterWriter) Write(p []byte) (n int, err error) {
-	logStr := string(p)
-
-	if strings.Contains(logStr, "level=WARN") ||
-		strings.Contains(logStr, "level=ERROR") ||
-		strings.Contains(logStr, `"level":"WARN"`) ||
-		strings.Contains(logStr, `"level":"ERROR"`) {
-		// Don't write WARN/ERROR to info file
-		return len(p), nil
-	}
-
-	// Write DEBUG/INFO to info file
-	return lfw.writer.Write(p)
-}
-
-// Logger wraps slog.Logger with file rotation
+// Logger writes structured records to daily files and optional console streams.
+// Values returned by With share the underlying files and lifecycle.
 type Logger struct {
-	config      Config
-	infoLogger  *slog.Logger
-	errorLogger *slog.Logger
-	infoFile    *os.File
-	errorFile   *os.File
-	infoBuffer  *bufferedWriter
-	errorBuffer *bufferedWriter
-	currentDate string
-	mu          sync.RWMutex
+	config  Config
+	core    *loggerCore
+	handler slog.Handler
+	ctx     context.Context
 }
 
-// New creates a new Logger instance
+type loggerCore struct {
+	mu          sync.RWMutex
+	cleanupMu   sync.Mutex
+	config      Config
+	baseDir     string
+	level       slog.LevelVar
+	sinks       *sinkSet
+	currentDate string
+	limiter     *rateLimiter
+	nowFunc     func() time.Time
+	stopCleanup chan struct{}
+	stopOnce    sync.Once
+	cleanupWG   sync.WaitGroup
+	closed      bool
+}
+
+type sinkSet struct {
+	mainFile     *os.File
+	errorFile    *os.File
+	mainBuffer   *bufferedWriter
+	errorBuffer  *bufferedWriter
+	mainHandler  slog.Handler
+	errorHandler slog.Handler
+	stdout       slog.Handler
+	stderr       slog.Handler
+}
+
+type minimumLevel struct{}
+
+func (minimumLevel) Level() slog.Level { return slog.Level(-1 << 30) }
+
+// New validates config, opens the current daily files, and starts retention cleanup.
 func New(config Config) (*Logger, error) {
-	// Set defaults if empty
-	if config.LogDir == "" {
-		config.LogDir = "logs"
+	config = config.withDefaults()
+	if err := config.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid logger configuration: %w", err)
 	}
-	if config.AppName == "" {
-		config.AppName = "app"
-	}
-	if config.RetentionDays <= 0 {
-		config.RetentionDays = 7
-	}
-	if config.TimeFormat == "" {
-		config.TimeFormat = time.RFC3339
-	}
-
-	// Create log directory
+	config.Filters = cloneFilterConfig(config.Filters)
 	if err := os.MkdirAll(config.LogDir, 0o700); err != nil {
-		return nil, fmt.Errorf("failed to create log directory: %w", err)
+		return nil, fmt.Errorf("create log directory: %w", err)
+	}
+	baseDir, err := filepath.Abs(config.LogDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve log directory: %w", err)
 	}
 
-	l := &Logger{
+	core := &loggerCore{
 		config:      config,
-		currentDate: time.Now().Format("2006-01-02"),
+		baseDir:     baseDir,
+		limiter:     newRateLimiter(config.Filters.RateLimits),
+		nowFunc:     time.Now,
+		stopCleanup: make(chan struct{}),
 	}
-
-	if err := l.initLoggers(); err != nil {
+	core.level.Set(config.LogLevel)
+	today := core.now().Format(time.DateOnly)
+	core.sinks, err = newSinkSet(config, baseDir, today)
+	if err != nil {
 		return nil, err
 	}
+	core.currentDate = today
 
-	// Start cleanup
-	go l.startCleanupRoutine()
-
-	return l, nil
+	logger := &Logger{config: config, core: core, ctx: context.Background()}
+	logger.handler = newPipelineHandler(core)
+	core.cleanupWG.Add(1)
+	go core.cleanupLoop()
+	return logger, nil
 }
 
-// initLoggers initializes both info and error loggers
-func (l *Logger) initLoggers() error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	// Close existing buffers and files if open
-	if l.infoBuffer != nil {
-		l.infoBuffer.Close()
-	}
-	if l.errorBuffer != nil {
-		l.errorBuffer.Close()
-	}
-	if l.infoFile != nil {
-		l.infoFile.Close()
-	}
-	if l.errorFile != nil {
-		l.errorFile.Close()
-	}
-
-	var err error
-	today := time.Now().Format("2006-01-02")
-
-	baseDir, err := filepath.Abs(l.config.LogDir)
+func newSinkSet(config Config, baseDir, date string) (*sinkSet, error) {
+	mainPath := filepath.Join(baseDir, fmt.Sprintf("%s_%s.log", config.AppName, date))
+	errorPath := filepath.Join(baseDir, fmt.Sprintf("%s_error_%s.log", config.AppName, date))
+	mainFile, err := os.OpenFile(mainPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		return fmt.Errorf("resolve log dir: %w", err)
+		return nil, fmt.Errorf("open main log file: %w", err)
 	}
-
-	// Open info log file
-	infoPath := filepath.Join(baseDir, fmt.Sprintf("%s_%s.log", l.config.AppName, today))
-
-	if rel, err := filepath.Rel(baseDir, infoPath); err != nil || strings.HasPrefix(rel, "..") {
-		return fmt.Errorf("invalid log file path: %s", infoPath)
-	}
-
-	l.infoFile, err = os.OpenFile(infoPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	errorFile, err := os.OpenFile(errorPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		return fmt.Errorf("failed to open info log file: %w", err)
+		_ = mainFile.Close()
+		return nil, fmt.Errorf("open error log file: %w", err)
 	}
 
-	// Open error log file
-	errorPath := filepath.Join(baseDir, fmt.Sprintf("%s_error_%s.log", l.config.AppName, today))
-	if rel, err := filepath.Rel(baseDir, errorPath); err != nil || strings.HasPrefix(rel, "..") {
-		return fmt.Errorf("invalid log_error file path: %s", errorPath)
-	}
-
-	l.errorFile, err = os.OpenFile(errorPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		return fmt.Errorf("failed to open error log file: %w", err)
-	}
-
-	// Create buffered writers for file output
-	l.infoBuffer = newBufferedWriter(l.infoFile, l.config.BufferSize, l.config.FlushInterval, l.config.FlushOnLevel)
-	l.errorBuffer = newBufferedWriter(l.errorFile, l.config.BufferSize, l.config.FlushInterval, l.config.FlushOnLevel)
-
-	// Create writers based on console output configuration
-	infoFileWriter := &levelFilterWriter{
-		writer:   l.infoBuffer,
-		maxLevel: slog.LevelInfo, // Only DEBUG and INFO
-	}
-
-	var infoWriter, errorWriter io.Writer
-	if l.config.ConsoleOutput {
-		// Enable console output
-		infoWriter = io.MultiWriter(os.Stdout, infoFileWriter)
-		errorWriter = io.MultiWriter(os.Stderr, l.errorBuffer)
-	} else {
-		// File output only
-		infoWriter = infoFileWriter
-		errorWriter = l.errorBuffer
-	}
-
-	// slog options
+	mainBuffer := newBufferedWriter(mainFile, config.BufferSize, config.FlushInterval)
+	errorBuffer := newBufferedWriter(errorFile, config.BufferSize, config.FlushInterval)
 	opts := &slog.HandlerOptions{
-		AddSource: l.config.AddSource,
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			// Custom time format
-			if a.Key == slog.TimeKey {
-				return slog.Attr{
-					Key:   a.Key,
-					Value: slog.StringValue(a.Value.Time().Format(l.config.TimeFormat)),
-				}
+		AddSource: config.AddSource,
+		Level:     minimumLevel{},
+		ReplaceAttr: func(_ []string, attr slog.Attr) slog.Attr {
+			if attr.Key == slog.TimeKey {
+				attr.Value = slog.StringValue(attr.Value.Time().Format(config.TimeFormat))
 			}
-			return a
+			return attr
 		},
 	}
+	createHandler := func(writer io.Writer) slog.Handler {
+		if config.JSONFormat {
+			return slog.NewJSONHandler(writer, opts)
+		}
+		return slog.NewTextHandler(writer, opts)
+	}
+	sinks := &sinkSet{
+		mainFile:     mainFile,
+		errorFile:    errorFile,
+		mainBuffer:   mainBuffer,
+		errorBuffer:  errorBuffer,
+		mainHandler:  createHandler(mainBuffer),
+		errorHandler: createHandler(errorBuffer),
+	}
+	if config.ConsoleOutput {
+		sinks.stdout = createHandler(os.Stdout)
+		sinks.stderr = createHandler(os.Stderr)
+	}
+	return sinks, nil
+}
 
-	// Set log level from config
-	opts.Level = l.config.LogLevel
+func (s *sinkSet) close() error {
+	if s == nil {
+		return nil
+	}
+	return errors.Join(s.mainBuffer.Close(), s.errorBuffer.Close(), s.mainFile.Close(), s.errorFile.Close())
+}
 
-	// Create base handlers
-	var infoHandler, errorHandler slog.Handler
-	if l.config.JSONFormat {
-		infoHandler = slog.NewJSONHandler(infoWriter, opts)
-		errorHandler = slog.NewJSONHandler(errorWriter, opts)
-	} else {
-		infoHandler = slog.NewTextHandler(infoWriter, opts)
-		errorHandler = slog.NewTextHandler(errorWriter, opts)
+func (c *loggerCore) now() time.Time {
+	if c.nowFunc != nil {
+		return c.nowFunc()
+	}
+	return time.Now()
+}
+
+func (c *loggerCore) enabled(level slog.Level) bool {
+	c.mu.RLock()
+	closed := c.closed
+	c.mu.RUnlock()
+	return !closed && level >= c.level.Level()
+}
+
+func (c *loggerCore) route(ctx context.Context, record slog.Record) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil
+	}
+	date := c.now().Format(time.DateOnly)
+	if date != c.currentDate {
+		if err := c.reopenLocked(date); err != nil {
+			return err
+		}
 	}
 
-	// Wrap with filtered handlers
-	filteredInfoHandler := newFilteredHandler(infoHandler, l.config.Filters)
-	filteredErrorHandler := newFilteredHandler(errorHandler, l.config.Filters)
-
-	l.infoLogger = slog.New(filteredInfoHandler)
-	l.errorLogger = slog.New(filteredErrorHandler)
-
-	l.currentDate = today
-	return nil
-}
-
-// checkDateRotation checks if we need to rotate log files
-func (l *Logger) checkDateRotation() {
-	today := time.Now().Format("2006-01-02")
-	if today != l.currentDate {
-		l.initLoggers() // This will handle the rotation
+	var errs []error
+	if err := c.sinks.mainHandler.Handle(ctx, record); err != nil {
+		errs = append(errs, err)
 	}
+	if record.Level >= slog.LevelWarn {
+		if err := c.sinks.errorHandler.Handle(ctx, record); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if c.sinks.stdout != nil {
+		console := c.sinks.stdout
+		if record.Level >= slog.LevelWarn {
+			console = c.sinks.stderr
+		}
+		if err := console.Handle(ctx, record); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if c.config.BufferSize > 0 && record.Level >= c.config.FlushOnLevel {
+		errs = append(errs, c.sinks.mainBuffer.Flush())
+		if record.Level >= slog.LevelWarn {
+			errs = append(errs, c.sinks.errorBuffer.Flush())
+		}
+	}
+	return errors.Join(errs...)
 }
 
-// Debug logs debug level message
-func (l *Logger) Debug(msg string, args ...any) {
-	l.checkDateRotation()
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	l.infoLogger.Debug(msg, args...)
+func (c *loggerCore) reopenLocked(date string) error {
+	newSinks, err := newSinkSet(c.config, c.baseDir, date)
+	if err != nil {
+		return err
+	}
+	old := c.sinks
+	c.sinks = newSinks
+	c.currentDate = date
+	return old.close()
 }
 
-// Info logs info level message
-func (l *Logger) Info(msg string, args ...any) {
-	l.checkDateRotation()
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	l.infoLogger.Info(msg, args...)
+func (l *Logger) log(ctx context.Context, level slog.Level, msg string, args ...any) {
+	if l == nil || l.core == nil || !l.handler.Enabled(ctx, level) {
+		return
+	}
+	var pcs [1]uintptr
+	runtime.Callers(3, pcs[:])
+	record := slog.NewRecord(l.core.now(), level, msg, pcs[0])
+	record.Add(args...)
+	_ = l.handler.Handle(ctx, record)
 }
 
-// Warn logs warning level message
-func (l *Logger) Warn(msg string, args ...any) {
-	l.checkDateRotation()
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	l.infoLogger.Warn(msg, args...)
-	l.errorLogger.Warn(msg, args...)
+// Debug logs at slog.LevelDebug.
+func (l *Logger) Debug(msg string, args ...any) { l.log(l.context(), slog.LevelDebug, msg, args...) }
+
+// Info logs at slog.LevelInfo.
+func (l *Logger) Info(msg string, args ...any) { l.log(l.context(), slog.LevelInfo, msg, args...) }
+
+// Warn logs at slog.LevelWarn.
+func (l *Logger) Warn(msg string, args ...any) { l.log(l.context(), slog.LevelWarn, msg, args...) }
+
+// Error logs at slog.LevelError.
+func (l *Logger) Error(msg string, args ...any) { l.log(l.context(), slog.LevelError, msg, args...) }
+
+// DebugContext logs at slog.LevelDebug with ctx.
+func (l *Logger) DebugContext(ctx context.Context, msg string, args ...any) {
+	l.log(nonNilContext(ctx), slog.LevelDebug, msg, args...)
 }
 
-// Error logs error level message
-func (l *Logger) Error(msg string, args ...any) {
-	l.checkDateRotation()
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	l.infoLogger.Error(msg, args...)
-	l.errorLogger.Error(msg, args...)
+// InfoContext logs at slog.LevelInfo with ctx.
+func (l *Logger) InfoContext(ctx context.Context, msg string, args ...any) {
+	l.log(nonNilContext(ctx), slog.LevelInfo, msg, args...)
 }
 
-// With creates a logger with additional attributes
+// WarnContext logs at slog.LevelWarn with ctx.
+func (l *Logger) WarnContext(ctx context.Context, msg string, args ...any) {
+	l.log(nonNilContext(ctx), slog.LevelWarn, msg, args...)
+}
+
+// ErrorContext logs at slog.LevelError with ctx.
+func (l *Logger) ErrorContext(ctx context.Context, msg string, args ...any) {
+	l.log(nonNilContext(ctx), slog.LevelError, msg, args...)
+}
+
+func (l *Logger) context() context.Context {
+	if l == nil {
+		return context.Background()
+	}
+	return nonNilContext(l.ctx)
+}
+
+func nonNilContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
+}
+
+// With returns a logger with additional structured attributes.
 func (l *Logger) With(args ...any) *Logger {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-
-	newLogger := &Logger{
-		config:      l.config,
-		infoFile:    l.infoFile,
-		errorFile:   l.errorFile,
-		infoBuffer:  l.infoBuffer,
-		errorBuffer: l.errorBuffer,
-		currentDate: l.currentDate,
-		infoLogger:  l.infoLogger.With(args...),
-		errorLogger: l.errorLogger.With(args...),
+	if l == nil {
+		return nil
 	}
-	return newLogger
+	record := slog.NewRecord(time.Time{}, slog.LevelInfo, "", 0)
+	record.Add(args...)
+	attrs := make([]slog.Attr, 0, record.NumAttrs())
+	record.Attrs(func(attr slog.Attr) bool { attrs = append(attrs, attr); return true })
+	return &Logger{config: l.config, core: l.core, handler: l.handler.WithAttrs(attrs), ctx: l.ctx}
 }
 
-// WithContext creates a logger with context
+// WithContext returns a logger that uses ctx for calls without an explicit context.
+// Deprecated: pass context to DebugContext, InfoContext, WarnContext, or ErrorContext.
 func (l *Logger) WithContext(ctx context.Context) *Logger {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-
-	newLogger := &Logger{
-		config:      l.config,
-		infoFile:    l.infoFile,
-		errorFile:   l.errorFile,
-		infoBuffer:  l.infoBuffer,
-		errorBuffer: l.errorBuffer,
-		currentDate: l.currentDate,
-		infoLogger:  l.infoLogger.WithGroup("context"),
-		errorLogger: l.errorLogger.WithGroup("context"),
+	if l == nil {
+		return nil
 	}
-	return newLogger
+	return &Logger{config: l.config, core: l.core, handler: l.handler, ctx: nonNilContext(ctx)}
 }
 
-// SetLevel changes the log level dynamically
+// SetLevel changes the shared minimum level without reopening files.
 func (l *Logger) SetLevel(level slog.Level) error {
+	if l == nil || l.core == nil {
+		return nil
+	}
+	l.core.level.Set(level)
+	l.core.mu.Lock()
+	l.core.config.LogLevel = level
+	l.core.mu.Unlock()
 	l.config.LogLevel = level
-	return l.initLoggers()
+	return nil
 }
 
-// Flush flushes all buffers to ensure data is written to disk
+// Flush writes both pending file buffers.
 func (l *Logger) Flush() error {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-
-	var errs []error
-	if l.infoBuffer != nil {
-		if err := l.infoBuffer.Flush(); err != nil {
-			errs = append(errs, err)
-		}
+	if l == nil || l.core == nil {
+		return nil
 	}
-	if l.errorBuffer != nil {
-		if err := l.errorBuffer.Flush(); err != nil {
-			errs = append(errs, err)
-		}
+	l.core.mu.RLock()
+	defer l.core.mu.RUnlock()
+	if l.core.closed {
+		return nil
 	}
-
-	if len(errs) > 0 {
-		return fmt.Errorf("errors flushing buffers: %v", errs)
-	}
-	return nil
+	return errors.Join(l.core.sinks.mainBuffer.Flush(), l.core.sinks.errorBuffer.Flush())
 }
 
-// Close closes the logger and its files
+// Close stops background work and closes shared files. It is safe to call repeatedly.
 func (l *Logger) Close() error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	var errs []error
-
-	// Flush and close buffers first
-	if l.infoBuffer != nil {
-		if err := l.infoBuffer.Close(); err != nil {
-			errs = append(errs, err)
-		}
+	if l == nil || l.core == nil {
+		return nil
 	}
-	if l.errorBuffer != nil {
-		if err := l.errorBuffer.Close(); err != nil {
-			errs = append(errs, err)
-		}
+	l.core.stopOnce.Do(func() { close(l.core.stopCleanup) })
+	l.core.cleanupWG.Wait()
+	l.core.mu.Lock()
+	defer l.core.mu.Unlock()
+	if l.core.closed {
+		return nil
 	}
-
-	// Then close files
-	if l.infoFile != nil {
-		if err := l.infoFile.Close(); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	if l.errorFile != nil {
-		if err := l.errorFile.Close(); err != nil {
-			errs = append(errs, err)
-		}
-	}
-
-	if len(errs) > 0 {
-		return fmt.Errorf("errors closing logger: %v", errs)
-	}
-	return nil
+	l.core.closed = true
+	return l.core.sinks.close()
 }
+
+// Reopen closes and reopens the current daily files. It is useful with
+// external file-rotation tools.
+func (l *Logger) Reopen() error {
+	if l == nil || l.core == nil {
+		return nil
+	}
+	l.core.mu.Lock()
+	defer l.core.mu.Unlock()
+	if l.core.closed {
+		return nil
+	}
+	return l.core.reopenLocked(l.core.now().Format(time.DateOnly))
+}
+
+// RotateNow is retained for compatibility.
+// Deprecated: use Reopen; daily filenames cannot rotate twice on one date.
+func (l *Logger) RotateNow() error { return l.Reopen() }
