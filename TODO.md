@@ -40,7 +40,7 @@
 - [ ] Circuit breaker for logging errors
 
 ## ⚙️ DevOps & Operations
-- [ ] Graceful shutdown with buffer flush
+- [X] Graceful shutdown with buffer flush
 - [ ] Hot config reload without restart
 - [ ] Log shipping to ELK, Fluentd, Loki
 - [ ] Kubernetes integration (auto pod/namespace labels)

@@ -10,9 +10,10 @@ import (
 )
 
 func TestNew(t *testing.T) {
+	tempDir := t.TempDir()
 	config := DefaultConfig().
 		WithAppName("test").
-		WithLogDir("test-logs").
+		WithLogDir(tempDir).
 		WithLogLevel(slog.LevelDebug)
 
 	logger, err := New(config)
@@ -20,7 +21,6 @@ func TestNew(t *testing.T) {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
 	defer logger.Close()
-	defer os.RemoveAll("test-logs")
 
 	if logger.config.AppName != "test" {
 		t.Errorf("Expected app name 'test', got '%s'", logger.config.AppName)
@@ -32,9 +32,10 @@ func TestNew(t *testing.T) {
 }
 
 func TestLogLevels(t *testing.T) {
+	tempDir := t.TempDir()
 	config := DefaultConfig().
 		WithAppName("test-levels").
-		WithLogDir("test-logs-levels").
+		WithLogDir(tempDir).
 		WithLogLevel(slog.LevelDebug)
 
 	logger, err := New(config)
@@ -42,7 +43,6 @@ func TestLogLevels(t *testing.T) {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
 	defer logger.Close()
-	defer os.RemoveAll("test-logs-levels")
 
 	logger.Debug("Debug message", "key", "value")
 	logger.Info("Info message", "key", "value")
@@ -50,8 +50,8 @@ func TestLogLevels(t *testing.T) {
 	logger.Error("Error message", "key", "value")
 
 	today := time.Now().Format("2006-01-02")
-	infoPath := filepath.Join("test-logs-levels", "test-levels_"+today+".log")
-	errorPath := filepath.Join("test-logs-levels", "test-levels_error_"+today+".log")
+	infoPath := filepath.Join(tempDir, "test-levels_"+today+".log")
+	errorPath := filepath.Join(tempDir, "test-levels_error_"+today+".log")
 
 	if _, err := os.Stat(infoPath); os.IsNotExist(err) {
 		t.Error("Info log file was not created")
@@ -65,7 +65,7 @@ func TestLogLevels(t *testing.T) {
 func TestLogLevelChange(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("test-level").
-		WithLogDir("test-logs-level").
+		WithLogDir(t.TempDir()).
 		WithLogLevel(slog.LevelWarn) // Start with WARN level
 
 	logger, err := New(config)
@@ -73,7 +73,6 @@ func TestLogLevelChange(t *testing.T) {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
 	defer logger.Close()
-	defer os.RemoveAll("test-logs-level")
 
 	if logger.config.LogLevel != slog.LevelWarn {
 		t.Error("Expected log level to be WARN initially")
@@ -92,7 +91,7 @@ func TestLogLevelChange(t *testing.T) {
 func TestWith(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("test-with").
-		WithLogDir("test-logs-with").
+		WithLogDir(t.TempDir()).
 		WithLogLevel(slog.LevelDebug)
 
 	logger, err := New(config)
@@ -100,7 +99,6 @@ func TestWith(t *testing.T) {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
 	defer logger.Close()
-	defer os.RemoveAll("test-logs-with")
 
 	contextLogger := logger.With("user_id", 123, "session", "abc")
 	contextLogger.Info("Test message with context")
@@ -111,7 +109,7 @@ func TestWith(t *testing.T) {
 func TestGlobalLogger(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("test-global").
-		WithLogDir("test-logs-global").
+		WithLogDir(t.TempDir()).
 		WithLogLevel(slog.LevelDebug)
 
 	err := Init(config)
@@ -119,7 +117,6 @@ func TestGlobalLogger(t *testing.T) {
 		t.Fatalf("Failed to initialize global logger: %v", err)
 	}
 	defer Close()
-	defer os.RemoveAll("test-logs-global")
 
 	Debug("Global debug message")
 	Info("Global info message")
@@ -167,14 +164,14 @@ func TestConfigBuilder(t *testing.T) {
 	}
 
 	if !config.AddSource {
-		t.Error("Expected add-source to be disabled")
+		t.Error("Expected add-source to be enabled")
 	}
 }
 
 func TestFileRotation(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("test-rotation").
-		WithLogDir("test-logs-rotation").
+		WithLogDir(t.TempDir()).
 		WithLogLevel(slog.LevelDebug)
 
 	logger, err := New(config)
@@ -182,7 +179,6 @@ func TestFileRotation(t *testing.T) {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
 	defer logger.Close()
-	defer os.RemoveAll("test-logs-rotation")
 
 	logger.Info("Before rotation")
 
@@ -207,14 +203,13 @@ func TestFileRotation(t *testing.T) {
 func TestLogFileNaming(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("naming-test").
-		WithLogDir("test-logs-naming")
+		WithLogDir(t.TempDir())
 
 	logger, err := New(config)
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
 	defer logger.Close()
-	defer os.RemoveAll("test-logs-naming")
 
 	logger.Info("Test message")
 
@@ -247,9 +242,10 @@ func TestLogFileNaming(t *testing.T) {
 }
 
 func TestCleanup(t *testing.T) {
+	tempDir := t.TempDir()
 	config := DefaultConfig().
 		WithAppName("test-cleanup").
-		WithLogDir("test-logs-cleanup").
+		WithLogDir(tempDir).
 		WithRetentionDays(1) // Keep only 1 day
 
 	logger, err := New(config)
@@ -257,10 +253,9 @@ func TestCleanup(t *testing.T) {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
 	defer logger.Close()
-	defer os.RemoveAll("test-logs-cleanup")
 
 	oldDate := time.Now().AddDate(0, 0, -2).Format("2006-01-02")
-	oldFile := filepath.Join("test-logs-cleanup", "test-cleanup_"+oldDate+".log")
+	oldFile := filepath.Join(tempDir, "test-cleanup_"+oldDate+".log")
 
 	file, err := os.Create(oldFile)
 	if err != nil {
@@ -271,9 +266,9 @@ func TestCleanup(t *testing.T) {
 	twoDaysAgo := time.Now().AddDate(0, 0, -2)
 	os.Chtimes(oldFile, twoDaysAgo, twoDaysAgo)
 
-	logger.CleanupNow()
-
-	time.Sleep(100 * time.Millisecond)
+	if err := logger.Cleanup(); err != nil {
+		t.Fatalf("Failed to clean up logs: %v", err)
+	}
 
 	if _, err := os.Stat(oldFile); !os.IsNotExist(err) {
 		t.Error("Expected old log file to be removed")
@@ -307,7 +302,7 @@ func TestIsOurLogFile(t *testing.T) {
 func BenchmarkLogging(b *testing.B) {
 	config := DefaultConfig().
 		WithAppName("bench").
-		WithLogDir("bench-logs").
+		WithLogDir(b.TempDir()).
 		WithLogLevel(slog.LevelDebug)
 
 	logger, err := New(config)
@@ -315,7 +310,6 @@ func BenchmarkLogging(b *testing.B) {
 		b.Fatalf("Failed to create logger: %v", err)
 	}
 	defer logger.Close()
-	defer os.RemoveAll("bench-logs")
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
@@ -326,8 +320,7 @@ func BenchmarkLogging(b *testing.B) {
 }
 
 func TestLogger_BufferedWrites(t *testing.T) {
-	tempDir := filepath.Join(os.TempDir(), "islogger_buffer_test")
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	config := DefaultConfig().
 		WithLogDir(tempDir).
@@ -385,8 +378,7 @@ func TestLogger_BufferedWrites(t *testing.T) {
 }
 
 func TestLogger_BufferedWritesWithoutBuffering(t *testing.T) {
-	tempDir := filepath.Join(os.TempDir(), "islogger_nobuffer_test")
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	config := DefaultConfig().
 		WithLogDir(tempDir).
@@ -426,8 +418,7 @@ func TestLogger_BufferedWritesWithoutBuffering(t *testing.T) {
 }
 
 func TestLogger_BufferedWritesAutoFlush(t *testing.T) {
-	tempDir := filepath.Join(os.TempDir(), "islogger_autoflush_test")
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	config := DefaultConfig().
 		WithLogDir(tempDir).
@@ -447,22 +438,24 @@ func TestLogger_BufferedWritesAutoFlush(t *testing.T) {
 
 	infoFile := filepath.Join(tempDir, "autoflush_test_"+time.Now().Format("2006-01-02")+".log")
 
-	// Wait for auto-flush
-	time.Sleep(100 * time.Millisecond)
-
-	// File should have content due to auto-flush
-	infoContent, err := os.ReadFile(infoFile)
-	if err != nil {
-		t.Fatalf("Failed to read info file: %v", err)
-	}
-	if !strings.Contains(string(infoContent), "This is an auto-flush test message") {
-		t.Fatal("Info file should contain auto-flushed message")
+	deadline := time.After(time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			infoContent, err := os.ReadFile(infoFile)
+			if err == nil && strings.Contains(string(infoContent), "This is an auto-flush test message") {
+				return
+			}
+		case <-deadline:
+			t.Fatal("Info file should contain auto-flushed message")
+		}
 	}
 }
 
 func TestLogger_BufferedWritesImmediateFlushOnError(t *testing.T) {
-	tempDir := filepath.Join(os.TempDir(), "islogger_errorflush_test")
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	config := DefaultConfig().
 		WithLogDir(tempDir).

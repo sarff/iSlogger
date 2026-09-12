@@ -2,15 +2,15 @@ package iSlogger
 
 import (
 	"bytes"
-	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
 func TestBufferedWriter_Write(t *testing.T) {
 	buf := &bytes.Buffer{}
-	bw := newBufferedWriter(buf, 100, 0, slog.LevelError)
+	bw := newBufferedWriter(buf, 100, 0)
 	defer bw.Close()
 
 	data := []byte("test message")
@@ -30,7 +30,7 @@ func TestBufferedWriter_Write(t *testing.T) {
 
 func TestBufferedWriter_FlushOnSize(t *testing.T) {
 	buf := &bytes.Buffer{}
-	bw := newBufferedWriter(buf, 10, 0, slog.LevelError) // Small buffer
+	bw := newBufferedWriter(buf, 10, 0) // Small buffer
 	defer bw.Close()
 
 	data := []byte("this is a long message that exceeds buffer size")
@@ -48,29 +48,21 @@ func TestBufferedWriter_FlushOnSize(t *testing.T) {
 	}
 }
 
-func TestBufferedWriter_FlushOnLevel(t *testing.T) {
+func TestBufferedWriter_DoesNotInspectLogText(t *testing.T) {
 	buf := &bytes.Buffer{}
-	bw := newBufferedWriter(buf, 1000, 0, slog.LevelWarn) // Large buffer, flush on WARN
+	bw := newBufferedWriter(buf, 1000, 0)
 	defer bw.Close()
 
-	// Write INFO level - should not flush immediately
-	infoData := []byte(`{"level":"INFO","msg":"info message"}`)
-	bw.Write(infoData)
-	if buf.Len() > 0 {
-		t.Fatal("INFO message should not flush immediately")
-	}
-
-	// Write WARN level - should flush immediately
 	warnData := []byte(`{"level":"WARN","msg":"warning message"}`)
 	bw.Write(warnData)
-	if buf.Len() == 0 {
-		t.Fatal("WARN message should trigger immediate flush")
+	if buf.Len() > 0 {
+		t.Fatal("buffer must not infer flush policy from formatted bytes")
 	}
 }
 
 func TestBufferedWriter_ManualFlush(t *testing.T) {
 	buf := &bytes.Buffer{}
-	bw := newBufferedWriter(buf, 1000, 0, slog.LevelError)
+	bw := newBufferedWriter(buf, 1000, 0)
 	defer bw.Close()
 
 	data := []byte("test message")
@@ -97,14 +89,17 @@ func TestBufferedWriter_ManualFlush(t *testing.T) {
 }
 
 func TestBufferedWriter_AutoFlush(t *testing.T) {
-	buf := &bytes.Buffer{}
-	bw := newBufferedWriter(buf, 1000, 50*time.Millisecond, slog.LevelError)
+	buf := &notifyingBuffer{wrote: make(chan struct{})}
+	bw := newBufferedWriter(buf, 1000, 50*time.Millisecond)
 
 	data := []byte("test message")
 	bw.Write(data)
 
-	// Wait for auto flush - longer wait to ensure flush happens
-	time.Sleep(100 * time.Millisecond)
+	select {
+	case <-buf.wrote:
+	case <-time.After(time.Second):
+		t.Fatal("automatic flush did not run")
+	}
 
 	// Close the writer to stop goroutine and flush remaining data
 	err := bw.Close()
@@ -119,9 +114,21 @@ func TestBufferedWriter_AutoFlush(t *testing.T) {
 	}
 }
 
+type notifyingBuffer struct {
+	bytes.Buffer
+	wrote chan struct{}
+	once  sync.Once
+}
+
+func (b *notifyingBuffer) Write(p []byte) (int, error) {
+	n, err := b.Buffer.Write(p)
+	b.once.Do(func() { close(b.wrote) })
+	return n, err
+}
+
 func TestBufferedWriter_NoBuffering(t *testing.T) {
 	buf := &bytes.Buffer{}
-	bw := newBufferedWriter(buf, 0, 0, slog.LevelError) // No buffering
+	bw := newBufferedWriter(buf, 0, 0) // No buffering
 	defer bw.Close()
 
 	data := []byte("test message")
@@ -144,7 +151,7 @@ func TestBufferedWriter_NoBuffering(t *testing.T) {
 
 func TestBufferedWriter_Close(t *testing.T) {
 	buf := &bytes.Buffer{}
-	bw := newBufferedWriter(buf, 1000, 0, slog.LevelError)
+	bw := newBufferedWriter(buf, 1000, 0)
 
 	data := []byte("test message")
 	bw.Write(data)

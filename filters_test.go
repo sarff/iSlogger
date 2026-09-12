@@ -2,7 +2,6 @@ package iSlogger
 
 import (
 	"log/slog"
-	"os"
 	"testing"
 	"time"
 )
@@ -10,7 +9,7 @@ import (
 func TestFieldMasking(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("test-mask").
-		WithLogDir("test-logs-mask").
+		WithLogDir(t.TempDir()).
 		WithLogLevel(slog.LevelDebug).
 		WithFieldMask("password", "***").
 		WithFieldMask("credit_card", "****-****-****-****")
@@ -20,7 +19,6 @@ func TestFieldMasking(t *testing.T) {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
 	defer logger.Close()
-	defer os.RemoveAll("test-logs-mask")
 
 	logger.Info("User login", "username", "john", "password", "secret123", "credit_card", "1234-5678-9012-3456")
 
@@ -31,7 +29,7 @@ func TestFieldMasking(t *testing.T) {
 func TestFieldRedaction(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("test-redact").
-		WithLogDir("test-logs-redact").
+		WithLogDir(t.TempDir()).
 		WithLogLevel(slog.LevelDebug).
 		WithFieldRedaction("sensitive_data")
 
@@ -40,7 +38,6 @@ func TestFieldRedaction(t *testing.T) {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
 	defer logger.Close()
-	defer os.RemoveAll("test-logs-redact")
 
 	logger.Info("Processing", "user_id", 123, "sensitive_data", "should_not_appear")
 
@@ -50,7 +47,7 @@ func TestFieldRedaction(t *testing.T) {
 func TestRegexFilter(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("test-regex").
-		WithLogDir("test-logs-regex").
+		WithLogDir(t.TempDir()).
 		WithLogLevel(slog.LevelDebug).
 		WithRegexFilter(`\d{4}-\d{4}-\d{4}-\d{4}`, "****-****-****-****").                    // Credit card pattern
 		WithRegexFilter(`\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b`, "***@***.***") // Email pattern
@@ -60,7 +57,6 @@ func TestRegexFilter(t *testing.T) {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
 	defer logger.Close()
-	defer os.RemoveAll("test-logs-regex")
 
 	logger.Info("Payment processed", "message", "Card 1234-5678-9012-3456 charged for user@example.com")
 
@@ -70,23 +66,23 @@ func TestRegexFilter(t *testing.T) {
 func TestConditionalLogging(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("test-condition").
-		WithLogDir("test-logs-condition").
+		WithLogDir(t.TempDir()).
 		WithLogLevel(slog.LevelDebug).
-		WithLevelCondition(slog.LevelWarn).       // Only WARN and above
-		WithMessageContainsCondition("important") // OR contains "important"
+		WithLevelCondition(slog.LevelWarn).       // WARN and above
+		WithMessageContainsCondition("important") // AND contains "important"
 
 	logger, err := New(config)
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
 	defer logger.Close()
-	defer os.RemoveAll("test-logs-condition")
 
-	logger.Debug("Regular debug")  // Should NOT be logged
-	logger.Info("Regular info")    // Should NOT be logged
-	logger.Info("Important info")  // Should be logged (contains "important")
-	logger.Warn("Warning message") // Should be logged (WARN level)
-	logger.Error("Error message")  // Should be logged (ERROR level)
+	logger.Debug("Regular debug")           // Should NOT be logged
+	logger.Info("Regular info")             // Should NOT be logged
+	logger.Info("important info")           // Not logged (below WARN)
+	logger.Warn("Warning message")          // Not logged (missing "important")
+	logger.Warn("important warning")        // Logged
+	logger.Error("important error message") // Logged
 
 	// Test should complete without errors
 }
@@ -94,7 +90,7 @@ func TestConditionalLogging(t *testing.T) {
 func TestAttributeCondition(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("test-attr").
-		WithLogDir("test-logs-attr").
+		WithLogDir(t.TempDir()).
 		WithLogLevel(slog.LevelDebug).
 		WithAttributeCondition("user_type", "admin") // Only admin users
 
@@ -103,7 +99,6 @@ func TestAttributeCondition(t *testing.T) {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
 	defer logger.Close()
-	defer os.RemoveAll("test-logs-attr")
 
 	logger.Info("User action", "user_id", 123, "user_type", "regular") // Should NOT be logged
 	logger.Info("Admin action", "user_id", 456, "user_type", "admin")  // Should be logged
@@ -114,7 +109,7 @@ func TestAttributeCondition(t *testing.T) {
 func TestTimeBasedCondition(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("test-time").
-		WithLogDir("test-logs-time").
+		WithLogDir(t.TempDir()).
 		WithLogLevel(slog.LevelDebug).
 		WithTimeBasedCondition(9, 17) // Only during work hours (9-17)
 
@@ -123,7 +118,6 @@ func TestTimeBasedCondition(t *testing.T) {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
 	defer logger.Close()
-	defer os.RemoveAll("test-logs-time")
 
 	currentHour := time.Now().Hour()
 	logger.Info("Time-based log", "hour", currentHour)
@@ -135,7 +129,7 @@ func TestTimeBasedCondition(t *testing.T) {
 func TestRateLimit(t *testing.T) {
 	config := DefaultConfig().
 		WithAppName("test-rate").
-		WithLogDir("test-logs-rate").
+		WithLogDir(t.TempDir()).
 		WithLogLevel(slog.LevelDebug).
 		WithRateLimit(slog.LevelDebug, 3, time.Minute) // Max 3 DEBUG per minute
 
@@ -144,7 +138,6 @@ func TestRateLimit(t *testing.T) {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
 	defer logger.Close()
-	defer os.RemoveAll("test-logs-rate")
 
 	// Send 5 debug messages, only first 3 should be logged
 	for i := 0; i < 5; i++ {
@@ -158,7 +151,7 @@ func TestCombinedFilters(t *testing.T) {
 	// Test multiple filters working together
 	config := DefaultConfig().
 		WithAppName("test-combined").
-		WithLogDir("test-logs-combined").
+		WithLogDir(t.TempDir()).
 		WithLogLevel(slog.LevelDebug).
 		WithFieldMask("password", "***").
 		WithRegexFilter(`\d{4}-\d{4}-\d{4}-\d{4}`, "****-****-****-****").
@@ -170,7 +163,6 @@ func TestCombinedFilters(t *testing.T) {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
 	defer logger.Close()
-	defer os.RemoveAll("test-logs-combined")
 
 	logger.Debug("Debug message")                                                  // Should NOT be logged (below INFO)
 	logger.Info("User login", "password", "secret", "card", "1234-5678-9012-3456") // Should be logged with filtering

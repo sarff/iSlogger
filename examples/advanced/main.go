@@ -9,6 +9,8 @@ import (
 	"github.com/sarff/iSlogger"
 )
 
+type contextKey string
+
 func main() {
 	// Advanced configuration with JSON format and custom time
 	config := iSlogger.DefaultConfig().
@@ -42,9 +44,8 @@ func main() {
 	logger2.Info("Logger 2 started", "format", "Text")
 
 	// Context-aware logging
-	ctx := context.WithValue(context.Background(), "request_id", "req-12345")
-	ctxLogger := logger1.WithContext(ctx)
-	ctxLogger.Info("Processing request", "operation", "user_creation")
+	ctx := context.WithValue(context.Background(), contextKey("request_id"), "req-12345")
+	logger1.InfoContext(ctx, "Processing request", "operation", "user_creation")
 
 	// Chained context building
 	sessionLogger := logger1.
@@ -80,17 +81,19 @@ func main() {
 		"error_log", errorPath,
 	)
 
-	// Force rotation (useful for testing)
-	logger1.Info("Forcing log rotation...")
-	if err := logger1.RotateNow(); err != nil {
-		logger1.Error("Failed to rotate logs", "error", err)
+	// Reopen files after an external rotation.
+	logger1.Info("Reopening log files...")
+	if err := logger1.Reopen(); err != nil {
+		logger1.Error("Failed to reopen logs", "error", err)
 	} else {
-		logger1.Info("Log rotation completed")
+		logger1.Info("Log files reopened")
 	}
 
-	// Manual cleanup trigger
+	// Manual synchronous cleanup.
 	logger1.Info("Triggering cleanup...")
-	logger1.CleanupNow()
+	if err := logger1.Cleanup(); err != nil {
+		logger1.Error("Failed to clean up logs", "error", err)
+	}
 
 	// Performance logging example
 	start := time.Now()
