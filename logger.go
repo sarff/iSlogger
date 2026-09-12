@@ -24,6 +24,7 @@ type Logger struct {
 
 type loggerCore struct {
 	mu          sync.RWMutex
+	cleanupMu   sync.Mutex
 	config      Config
 	baseDir     string
 	level       slog.LevelVar

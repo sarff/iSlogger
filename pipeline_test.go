@@ -344,6 +344,52 @@ func TestCleanupUsesExactDatedNames(t *testing.T) {
 	}
 }
 
+func TestCleanupConcurrentCalls(t *testing.T) {
+	dir := t.TempDir()
+	logger, err := New(DefaultConfig().WithLogDir(dir).WithAppName("concurrent-cleanup").WithRetentionDays(1).WithConsoleOutput(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = logger.Close() })
+
+	old := filepath.Join(dir, "concurrent-cleanup_2000-01-01.log")
+	unrelated := filepath.Join(dir, "concurrent-cleanup_notes.log")
+	if err := os.WriteFile(old, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(unrelated, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	const cleanupCalls = 16
+	start := make(chan struct{})
+	errs := make(chan error, cleanupCalls)
+	var wg sync.WaitGroup
+	for range cleanupCalls {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- logger.Cleanup()
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Errorf("concurrent Cleanup() error: %v", err)
+		}
+	}
+
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Fatal("expired dated log was not removed")
+	}
+	if _, err := os.Stat(unrelated); err != nil {
+		t.Fatalf("unrelated log was removed: %v", err)
+	}
+}
+
 type shortWriter struct{}
 
 func (shortWriter) Write(p []byte) (int, error) { return len(p) / 2, nil }

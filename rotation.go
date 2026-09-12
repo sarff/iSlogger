@@ -25,6 +25,9 @@ func (c *loggerCore) cleanupLoop() {
 }
 
 func (c *loggerCore) cleanup() error {
+	c.cleanupMu.Lock()
+	defer c.cleanupMu.Unlock()
+
 	c.mu.RLock()
 	if c.closed {
 		c.mu.RUnlock()
@@ -54,7 +57,7 @@ func (c *loggerCore) cleanup() error {
 		if err != nil || !parsed.Before(cutoff) {
 			continue
 		}
-		if err := os.Remove(filepath.Join(baseDir, entry.Name())); err != nil {
+		if err := os.Remove(filepath.Join(baseDir, entry.Name())); err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, fmt.Errorf("remove %s: %w", entry.Name(), err))
 		}
 	}
